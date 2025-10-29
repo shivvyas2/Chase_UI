@@ -274,46 +274,107 @@ export default function CreditJourneyScreen() {
 
       {activeTab === 'alerts' && (
         <ScrollView style={styles.alertsSection} showsVerticalScrollIndicator={false}>
-          <View style={styles.alertsHeader}>
-            <Text style={styles.alertsTitle}>Credit Alerts</Text>
-            <Text style={styles.alertsSubtitle}>Stay informed about your credit activity</Text>
+          <View style={styles.alertsHeaderList}>
+            <Text style={styles.alertInboxTitle}>Alert Inbox</Text>
           </View>
 
-          {/* Alert Cards */}
-          <View style={styles.alertCard}>
-            <View style={styles.alertHeader}>
-              <IconSymbol name="exclamationmark.triangle.fill" size={20} color="#FF4444" />
-              <Text style={styles.alertType}>High Priority</Text>
+          {/* Alert rows list */}
+          <View style={styles.alertList}>
+            <View style={styles.alertRow}>
+              <View style={styles.alertIconCircle}>
+                <IconSymbol name="bookmark" size={18} color="#0B6BD3" />
+              </View>
+              <View style={styles.alertRowLeft}>
+                <Text style={styles.alertRowTitle}>Address change</Text>
+              </View>
+              <Text style={styles.alertRowDate}>10/10/2025</Text>
             </View>
-            <Text style={styles.alertTitle}>Credit Usage Increased</Text>
-            <Text style={styles.alertDescription}>
-              Your credit card usage has increased significantly. Consider paying down balances to improve your score.
-            </Text>
-            <Text style={styles.alertDate}>2 hours ago</Text>
-          </View>
+            <View style={styles.rowDivider} />
 
-          <View style={styles.alertCard}>
-            <View style={styles.alertHeader}>
-              <IconSymbol name="info.circle.fill" size={20} color="#0066CC" />
-              <Text style={styles.alertType}>Information</Text>
+            <View style={styles.alertRow}>
+              <View style={styles.alertIconCircle}>
+                <IconSymbol name="creditcard" size={18} color="#0B6BD3" />
+              </View>
+              <View style={styles.alertRowLeft}>
+                <Text style={styles.alertRowTitle}>New bank/credit card</Text>
+                <Text style={styles.alertRowSubtitle}>JPMCB CARD</Text>
+              </View>
+              <View style={styles.unreadPill}><Text style={styles.unreadText}>Unread</Text></View>
+              <Text style={styles.alertRowDate}>09/29/2025</Text>
             </View>
-            <Text style={styles.alertTitle}>New Account Reported</Text>
-            <Text style={styles.alertDescription}>
-              A new credit account has been reported to your credit file. This may temporarily impact your score.
-            </Text>
-            <Text style={styles.alertDate}>1 day ago</Text>
-          </View>
+            <View style={styles.rowDivider} />
 
-          <View style={styles.alertCard}>
-            <View style={styles.alertHeader}>
-              <IconSymbol name="checkmark.circle.fill" size={20} color="#00AA00" />
-              <Text style={styles.alertType}>Positive</Text>
+            <View style={styles.alertRow}>
+              <View style={styles.alertIconCircle}>
+                <IconSymbol name="megaphone" size={18} color="#0B6BD3" />
+              </View>
+              <View style={styles.alertRowLeft}>
+                <Text style={styles.alertRowTitle}>New credit inquiry</Text>
+                <Text style={styles.alertRowSubtitle}>JPMCB CARD SERVICES</Text>
+              </View>
+              <View style={styles.unreadPill}><Text style={styles.unreadText}>Unread</Text></View>
+              <Text style={styles.alertRowDate}>09/28/2025</Text>
             </View>
-            <Text style={styles.alertTitle}>Payment Received</Text>
-            <Text style={styles.alertDescription}>
-              Your payment of $150.00 has been received and processed successfully.
-            </Text>
-            <Text style={styles.alertDate}>3 days ago</Text>
+            <View style={styles.rowDivider} />
+
+            <View style={styles.alertRow}>
+              <View style={[styles.alertIconCircle, { backgroundColor: '#FFF4F4' }]}>
+                <IconSymbol name="exclamationmark.triangle" size={18} color="#E03A2F" />
+              </View>
+              <View style={styles.alertRowLeft}>
+                <Text style={styles.alertRowTitle}>Card over limit</Text>
+                <Text style={styles.alertRowSubtitle}>ZOLVE/CONTINENTAL BANK</Text>
+              </View>
+              <View style={styles.unreadPill}><Text style={styles.unreadText}>Unread</Text></View>
+              <Text style={styles.alertRowDate}>09/21/2025</Text>
+            </View>
+            <View style={styles.rowDivider} />
+
+            <View style={styles.alertRow}>
+              <View style={[styles.alertIconCircle, { backgroundColor: '#FFF4F4' }]}>
+                <IconSymbol name="exclamationmark.triangle" size={18} color="#E03A2F" />
+              </View>
+              <View style={styles.alertRowLeft}>
+                <Text style={styles.alertRowTitle}>Card over limit</Text>
+                <Text style={styles.alertRowSubtitle}>APPLE CARD/GS BANK USA</Text>
+              </View>
+              <Text style={styles.alertRowDate}>09/07/2025</Text>
+            </View>
+            <View style={styles.rowDivider} />
+
+            <View style={styles.alertRow}>
+              <View style={styles.alertIconCircle}>
+                <IconSymbol name="megaphone" size={18} color="#0B6BD3" />
+              </View>
+              <View style={styles.alertRowLeft}>
+                <Text style={styles.alertRowTitle}>New credit inquiry</Text>
+                <Text style={styles.alertRowSubtitle}>JPMCB CARD SERVICES</Text>
+              </View>
+              <Text style={styles.alertRowDate}>08/28/2025</Text>
+            </View>
+            <View style={styles.rowDivider} />
+
+            <View style={styles.alertRow}>
+              <View style={styles.alertIconCircle}>
+                <IconSymbol name="bookmark" size={18} color="#0B6BD3" />
+              </View>
+              <View style={styles.alertRowLeft}>
+                <Text style={styles.alertRowTitle}>Address change</Text>
+              </View>
+              <Text style={styles.alertRowDate}>08/20/2025</Text>
+            </View>
+            <View style={styles.rowDivider} />
+
+            <View style={styles.alertRow}>
+              <View style={[styles.alertIconCircle, { backgroundColor: '#FFF4F4' }]}>
+                <IconSymbol name="exclamationmark.triangle" size={18} color="#E03A2F" />
+              </View>
+              <View style={styles.alertRowLeft}>
+                <Text style={styles.alertRowTitle}>Card over limit</Text>
+                <Text style={styles.alertRowSubtitle}>DISCOVERC</Text>
+              </View>
+              <Text style={styles.alertRowDate}>08/19/2025</Text>
+            </View>
           </View>
         </ScrollView>
       )}
@@ -417,6 +478,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginRight: 8,
     borderRadius: 20,
+    position: 'relative',
   },
   activeTab: {
     backgroundColor: 'white',
@@ -431,19 +493,64 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: '#0066CC',
   },
-  alertBadge: {
+  quickRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  quickLabel: {
+    color: '#666666',
+    fontSize: 14,
+    opacity: 0.9,
+  },
+  quickPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  quickPillText: {
+    color: '#0066CC',
+    fontSize: 14,
+    marginLeft: 6,
+    fontWeight: '600',
+  },
+  quickBadge: {
+    marginLeft: 8,
     backgroundColor: '#0066CC',
     borderRadius: 10,
     width: 20,
     height: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 8,
+  },
+  quickBadgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  alertBadge: {
+    position: 'absolute',
+    top: -6,
+    right: 2,
+    backgroundColor: '#0066CC',
+    borderRadius: 8,
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
   },
   alertCount: {
     color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 10,
   },
   creditContent: {
     flex: 1,
@@ -652,20 +759,69 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     marginTop: -20,
   },
-  alertsHeader: {
+  alertsHeaderList: {
     paddingHorizontal: 16,
     paddingTop: 20,
-    paddingBottom: 16,
+    paddingBottom: 8,
   },
-  alertsTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+  alertInboxTitle: {
+    fontSize: 28,
+    fontWeight: '800',
     color: '#000000',
-    marginBottom: 8,
   },
-  alertsSubtitle: {
-    fontSize: 16,
-    color: '#666666',
+  alertList: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  alertRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  rowDivider: {
+    height: 1,
+    backgroundColor: '#EDEDED',
+  },
+  alertIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F2F7FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  alertRowLeft: {
+    flex: 1,
+  },
+  alertRowTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111111',
+  },
+  alertRowSubtitle: {
+    fontSize: 13,
+    color: '#8A8A8E',
+    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.2,
+  },
+  alertRowDate: {
+    fontSize: 14,
+    color: '#8A8A8E',
+    marginLeft: 8,
+  },
+  unreadPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: '#E8F1FF',
+    borderRadius: 14,
+    marginRight: 8,
+  },
+  unreadText: {
+    color: '#0B6BD3',
+    fontSize: 12,
+    fontWeight: '700',
   },
   alertCard: {
     backgroundColor: 'white',
