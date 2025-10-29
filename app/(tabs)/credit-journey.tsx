@@ -1,0 +1,791 @@
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import React, { useState } from 'react';
+import { ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Path, Svg } from 'react-native-svg';
+
+export default function CreditJourneyScreen() {
+  const [activeTab, setActiveTab] = useState('credit');
+  const [activeSubTab, setActiveSubTab] = useState('overview');
+
+  const CreditScoreGauge = () => (
+    <View style={styles.gaugeContainer}>
+      <Svg width={400} height={220} viewBox="0 0 400 220">
+        {/* Shadow arc (subtle outer glow) */}
+        <Path
+          d="M 80 180 A 120 120 0 0 1 320 180"
+          stroke="#000000"
+          strokeOpacity="0.12"
+          strokeWidth="14"
+          fill="none"
+          strokeLinecap="round"
+        />
+        {/* Track arc (unfilled outline visible under progress) */}
+        <Path
+          d="M 80 180 A 120 120 0 0 1 320 180"
+          stroke="#0D1B69"
+          strokeWidth="12"
+          fill="none"
+          strokeLinecap="round"
+        />
+        {/* Progress arc (filled portion) */}
+        <Path
+          d="M 80 180 A 120 120 0 0 1 320 180"
+          stroke="#FF6B35"
+          strokeWidth="12"
+          fill="none"
+          strokeDasharray="377"
+          strokeDashoffset="250"
+          strokeLinecap="round"
+        />
+        {/* Unfilled outline is preserved by the track arc above. */}
+      </Svg>
+      
+      <View style={styles.scoreInfo}>
+        <Text style={styles.scoreCategory}>Poor</Text>
+        <Text style={styles.scoreValue}>603</Text>
+        <View style={styles.scoreChange}>
+          <IconSymbol name="arrow.down" size={20} color="#FF6B35" />
+          <Text style={styles.scoreChangeText}>9 points</Text>
+        </View>
+      </View>
+      
+      <View style={styles.scoreFooter}>
+        <Text style={styles.scoreProvider}>VantageScore® 3.0 provided by Experian™</Text>
+        <TouchableOpacity>
+          <IconSymbol name="questionmark.circle" size={16} color="white" />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#1A237E" />
+      
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton}>
+          <IconSymbol name="chevron.left" size={24} color="white" />
+        </TouchableOpacity>
+        
+        <Text style={styles.headerTitle}>Chase Credit Journey</Text>
+        
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.notificationButton}>
+            <IconSymbol name="bell" size={24} color="white" />
+            <View style={styles.notificationBadge}>
+              <Text style={styles.notificationCount}>3</Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.moreButton}>
+            <IconSymbol name="ellipsis" size={20} color="white" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Main Navigation Tabs */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'credit' && styles.activeTab]}
+          onPress={() => setActiveTab('credit')}
+        >
+          <Text style={[styles.tabText, activeTab === 'credit' && styles.activeTabText]}>
+            Credit
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'alerts' && styles.activeTab]}
+          onPress={() => setActiveTab('alerts')}
+        >
+          <Text style={[styles.tabText, activeTab === 'alerts' && styles.activeTabText]}>
+            Alerts
+          </Text>
+          <View style={styles.alertBadge}>
+            <Text style={styles.alertCount}>3</Text>
+          </View>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'offers' && styles.activeTab]}
+          onPress={() => setActiveTab('offers')}
+        >
+          <Text style={[styles.tabText, activeTab === 'offers' && styles.activeTabText]}>
+            Offers
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Content based on active tab */}
+      {activeTab === 'credit' && (
+        <ScrollView style={styles.creditContent} showsVerticalScrollIndicator={false}>
+          {/* Credit Score Section */}
+          <View style={styles.scoreSection}>
+            <View style={styles.scoreHeader}>
+              <Text style={styles.scoreDate}>As of 10/29/25</Text>
+              <TouchableOpacity>
+                <Text style={styles.scoreHistory}>See score history {'>'}</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <CreditScoreGauge />
+          </View>
+
+          {/* Score Breakdown Card */}
+          <View style={styles.breakdownCard}>
+            <View style={styles.breakdownTabs}>
+              <TouchableOpacity 
+                style={[styles.breakdownTab, activeSubTab === 'overview' && styles.activeBreakdownTab]}
+                onPress={() => setActiveSubTab('overview')}
+              >
+                <Text style={[styles.breakdownTabText, activeSubTab === 'overview' && styles.activeBreakdownTabText]}>
+                  Overview
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.breakdownTab, activeSubTab === 'breakdown' && styles.activeBreakdownTab]}
+                onPress={() => setActiveSubTab('breakdown')}
+              >
+                <Text style={[styles.breakdownTabText, activeSubTab === 'breakdown' && styles.activeBreakdownTabText]}>
+                  Score breakdown
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {activeSubTab === 'overview' && (
+              <View style={styles.overviewContent}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Why your score changed</Text>
+                  <TouchableOpacity>
+                    <IconSymbol name="questionmark.circle" size={16} color="#0066CC" />
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={styles.changeList}>
+                  <View style={styles.changeItem}>
+                    <Text style={styles.changeDescription}>
+                      Credit usage increased on your revolving accounts opened in the last year
+                    </Text>
+                    <View style={styles.changeImpact}>
+                      <IconSymbol name="arrow.down" size={14} color="#FF6B35" />
+                      <Text style={styles.changePoints}>4 point</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.changeItem}>
+                    <Text style={styles.changeDescription}>
+                      Card account balances increased
+                    </Text>
+                    <View style={styles.changeImpact}>
+                      <IconSymbol name="arrow.down" size={14} color="#FF6B35" />
+                      <Text style={styles.changePoints}>2 point</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.changeItem}>
+                    <Text style={styles.changeDescription}>
+                      Credit usage increased on your accounts
+                    </Text>
+                    <View style={styles.changeImpact}>
+                      <IconSymbol name="arrow.down" size={14} color="#FF6B35" />
+                      <Text style={styles.changePoints}>1 point</Text>
+                    </View>
+                  </View>
+                </View>
+                
+                <View style={styles.errorMessage}>
+                  <IconSymbol name="exclamationmark.triangle.fill" size={16} color="#FF4444" />
+                  <Text style={styles.errorText}>
+                    We&apos;re having trouble showing some of the score change info for your accounts.
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {activeSubTab === 'breakdown' && (
+              <View style={styles.breakdownContent}>
+                <View style={styles.factorsHeader}>
+                  <Text style={styles.factorsTitle}>Factors that impact your score</Text>
+                  <Text style={styles.factorsSubtitle}>
+                    See each factor for a detailed look at what goes into it and how you&apos;re doing.
+                  </Text>
+                </View>
+                
+                <View style={styles.factorsList}>
+                  <TouchableOpacity style={styles.factorItem}>
+                    <View style={styles.factorIcon}>
+                      <IconSymbol name="calendar" size={20} color="#0066CC" />
+                    </View>
+                    <View style={styles.factorContent}>
+                      <Text style={styles.factorName}>Payment history</Text>
+                      <Text style={styles.factorImpact}>Very high impact</Text>
+                    </View>
+                    <IconSymbol name="chevron.right" size={16} color="#999999" />
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={styles.factorItem}>
+                    <View style={styles.factorIcon}>
+                      <IconSymbol name="folder" size={20} color="#0066CC" />
+                    </View>
+                    <View style={styles.factorContent}>
+                      <Text style={styles.factorName}>Credit history</Text>
+                      <Text style={styles.factorImpact}>High impact</Text>
+                    </View>
+                    <IconSymbol name="chevron.right" size={16} color="#999999" />
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={styles.factorItem}>
+                    <View style={styles.factorIcon}>
+                      <IconSymbol name="creditcard" size={20} color="#0066CC" />
+                    </View>
+                    <View style={styles.factorContent}>
+                      <Text style={styles.factorName}>Credit usage</Text>
+                      <Text style={styles.factorImpact}>High impact</Text>
+                    </View>
+                    <IconSymbol name="chevron.right" size={16} color="#999999" />
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={styles.factorItem}>
+                    <View style={styles.factorIcon}>
+                      <IconSymbol name="doc.text" size={20} color="#0066CC" />
+                    </View>
+                    <View style={styles.factorContent}>
+                      <Text style={styles.factorName}>Total balances</Text>
+                      <Text style={styles.factorImpact}>Medium impact</Text>
+                    </View>
+                    <IconSymbol name="chevron.right" size={16} color="#999999" />
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={styles.factorItem}>
+                    <View style={styles.factorIcon}>
+                      <IconSymbol name="doc.text" size={20} color="#0066CC" />
+                    </View>
+                    <View style={styles.factorContent}>
+                      <Text style={styles.factorName}>Credit checks</Text>
+                      <Text style={styles.factorImpact}>Low impact</Text>
+                    </View>
+                    <IconSymbol name="chevron.right" size={16} color="#999999" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      )}
+
+      {activeTab === 'alerts' && (
+        <ScrollView style={styles.alertsSection} showsVerticalScrollIndicator={false}>
+          <View style={styles.alertsHeader}>
+            <Text style={styles.alertsTitle}>Credit Alerts</Text>
+            <Text style={styles.alertsSubtitle}>Stay informed about your credit activity</Text>
+          </View>
+
+          {/* Alert Cards */}
+          <View style={styles.alertCard}>
+            <View style={styles.alertHeader}>
+              <IconSymbol name="exclamationmark.triangle.fill" size={20} color="#FF4444" />
+              <Text style={styles.alertType}>High Priority</Text>
+            </View>
+            <Text style={styles.alertTitle}>Credit Usage Increased</Text>
+            <Text style={styles.alertDescription}>
+              Your credit card usage has increased significantly. Consider paying down balances to improve your score.
+            </Text>
+            <Text style={styles.alertDate}>2 hours ago</Text>
+          </View>
+
+          <View style={styles.alertCard}>
+            <View style={styles.alertHeader}>
+              <IconSymbol name="info.circle.fill" size={20} color="#0066CC" />
+              <Text style={styles.alertType}>Information</Text>
+            </View>
+            <Text style={styles.alertTitle}>New Account Reported</Text>
+            <Text style={styles.alertDescription}>
+              A new credit account has been reported to your credit file. This may temporarily impact your score.
+            </Text>
+            <Text style={styles.alertDate}>1 day ago</Text>
+          </View>
+
+          <View style={styles.alertCard}>
+            <View style={styles.alertHeader}>
+              <IconSymbol name="checkmark.circle.fill" size={20} color="#00AA00" />
+              <Text style={styles.alertType}>Positive</Text>
+            </View>
+            <Text style={styles.alertTitle}>Payment Received</Text>
+            <Text style={styles.alertDescription}>
+              Your payment of $150.00 has been received and processed successfully.
+            </Text>
+            <Text style={styles.alertDate}>3 days ago</Text>
+          </View>
+        </ScrollView>
+      )}
+
+      {activeTab === 'offers' && (
+        <ScrollView style={styles.offersSection} showsVerticalScrollIndicator={false}>
+          <View style={styles.offersHeader}>
+            <Text style={styles.offersTitle}>Credit Offers</Text>
+            <Text style={styles.offersSubtitle}>Personalized offers to help improve your credit</Text>
+          </View>
+
+          {/* Offer Cards */}
+          <View style={styles.offerCard}>
+            <View style={styles.offerHeader}>
+              <IconSymbol name="star.fill" size={20} color="#FFD700" />
+              <Text style={styles.offerType}>Recommended</Text>
+            </View>
+            <Text style={styles.offerTitle}>Credit Limit Increase</Text>
+            <Text style={styles.offerDescription}>
+              You&apos;re pre-approved for a $2,000 credit limit increase on your Sapphire Preferred card.
+            </Text>
+            <TouchableOpacity style={styles.offerButton}>
+              <Text style={styles.offerButtonText}>Apply Now</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.offerCard}>
+            <View style={styles.offerHeader}>
+              <IconSymbol name="gift.fill" size={20} color="#0066CC" />
+              <Text style={styles.offerType}>Special Offer</Text>
+            </View>
+            <Text style={styles.offerTitle}>Balance Transfer</Text>
+            <Text style={styles.offerDescription}>
+              Transfer high-interest balances with 0% APR for 18 months. Save on interest payments.
+            </Text>
+            <TouchableOpacity style={styles.offerButton}>
+              <Text style={styles.offerButtonText}>Learn More</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#1A237E',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  notificationButton: {
+    position: 'relative',
+    padding: 8,
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#0066CC',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationCount: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  moreButton: {
+    padding: 8,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    alignItems: 'center',
+  },
+  tab: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 8,
+    borderRadius: 20,
+  },
+  activeTab: {
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#0066CC',
+  },
+  tabText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  activeTabText: {
+    color: '#0066CC',
+  },
+  alertBadge: {
+    backgroundColor: '#0066CC',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  alertCount: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  creditContent: {
+    flex: 1,
+  },
+  scoreSection: {
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+  },
+  scoreHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  scoreDate: {
+    color: 'white',
+    fontSize: 14,
+  },
+  scoreHistory: {
+    color: '#66B3FF',
+    fontSize: 14,
+  },
+  gaugeContainer: {
+    alignItems: 'center',
+    marginTop: -60,
+    marginBottom: 2,
+    paddingVertical: 10,
+  },
+  scoreInfo: {
+    alignItems: 'center',
+    marginTop: -112,
+  },
+  scoreCategory: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  scoreValue: {
+    color: 'white',
+    fontSize: 40,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  scoreChange: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  scoreChangeText: {
+    color: '#FF6B35',
+    fontSize: 18,
+    marginLeft: 4,
+    fontWeight: '600',
+  },
+  scoreFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    marginBottom: 40,
+  },
+  scoreProvider: {
+    color: 'white',
+    fontSize: 14,
+    marginRight: 8,
+  },
+  breakdownCard: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 20,
+    marginTop: -20,
+  },
+  breakdownTabs: {
+    flexDirection: 'row',
+    marginBottom: 20,
+  },
+  breakdownTab: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 8,
+    borderRadius: 20,
+  },
+  activeBreakdownTab: {
+    backgroundColor: '#0066CC',
+  },
+  breakdownTabText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666666',
+  },
+  activeBreakdownTabText: {
+    color: 'white',
+  },
+  overviewContent: {
+    flex: 1,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000000',
+  },
+  changeList: {
+    marginBottom: 16,
+  },
+  changeItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+  },
+  changeDescription: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333333',
+    marginRight: 16,
+  },
+  changeImpact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  changePoints: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FF6B35',
+    marginLeft: 4,
+  },
+  errorMessage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF5F5',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF4444',
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#FF4444',
+    marginLeft: 8,
+    flex: 1,
+  },
+  breakdownContent: {
+    flex: 1,
+  },
+  factorsHeader: {
+    marginBottom: 20,
+  },
+  factorsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  factorsSubtitle: {
+    fontSize: 14,
+    color: '#666666',
+    lineHeight: 20,
+  },
+  factorsList: {
+    flex: 1,
+  },
+  factorItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+  },
+  factorIcon: {
+    backgroundColor: '#F0F8FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  factorContent: {
+    flex: 1,
+  },
+  factorName: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#000000',
+    marginBottom: 4,
+  },
+  factorImpact: {
+    fontSize: 14,
+    color: '#0066CC',
+  },
+  alertsSection: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    marginTop: -20,
+  },
+  alertsHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 16,
+  },
+  alertsTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  alertsSubtitle: {
+    fontSize: 16,
+    color: '#666666',
+  },
+  alertCard: {
+    backgroundColor: 'white',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  alertHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  alertType: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666666',
+    marginLeft: 8,
+    textTransform: 'uppercase',
+  },
+  alertTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  alertDescription: {
+    fontSize: 14,
+    color: '#333333',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  alertDate: {
+    fontSize: 12,
+    color: '#666666',
+  },
+  offersSection: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    marginTop: -20,
+  },
+  offersHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 16,
+  },
+  offersTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  offersSubtitle: {
+    fontSize: 16,
+    color: '#666666',
+  },
+  offerCard: {
+    backgroundColor: 'white',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  offerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  offerType: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666666',
+    marginLeft: 8,
+    textTransform: 'uppercase',
+  },
+  offerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000000',
+    marginBottom: 8,
+  },
+  offerDescription: {
+    fontSize: 14,
+    color: '#333333',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  offerButton: {
+    backgroundColor: '#0066CC',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  offerButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
+

@@ -3,7 +3,7 @@ import React from 'react';
 import { ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-export default function AccountsScreen() {
+export default function PayTransferScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="white" />
@@ -58,151 +58,133 @@ export default function AccountsScreen() {
         </ScrollView>
       </View>
 
-      {/* Accounts Section */}
-      <ScrollView style={styles.accountsSection} showsVerticalScrollIndicator={false}>
+      {/* Pay & Transfer Section */}
+      <ScrollView style={styles.payTransferSection} showsVerticalScrollIndicator={false}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Accounts</Text>
+          <Text style={styles.sectionTitle}>Pay & Transfer</Text>
           <TouchableOpacity>
             <IconSymbol name="ellipsis" size={20} color="#999999" />
           </TouchableOpacity>
         </View>
 
-        {/* Bank Accounts */}
-        <View style={styles.accountCard}>
+        {/* Quick Actions Card */}
+        <View style={styles.featureCard}>
           <View style={styles.cardHeader}>
-            <Text style={styles.cardHeaderText}>Bank accounts (2)</Text>
+            <Text style={styles.cardHeaderText}>Quick Actions</Text>
           </View>
           <View style={styles.cardContent}>
-            <TouchableOpacity style={styles.accountItem}>
-              <Text style={styles.accountName}>CHASE COLLEGE (...8472)</Text>
-              <IconSymbol name="chevron.right" size={16} color="#999999" />
-            </TouchableOpacity>
-            <View style={styles.balanceContainer}>
-              <View style={styles.balanceTextContainer}>
-                <Text style={styles.balanceAmount}>$12,847.32</Text>
-                <Text style={styles.balanceLabel}>Available balance</Text>
-              </View>
-              <View style={styles.verticalLine} />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.accountCard}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardHeaderText}>Business Checking</Text>
-          </View>
-          <View style={styles.cardContent}>
-            <TouchableOpacity style={styles.accountItem}>
-              <Text style={styles.accountName}>CHASE BUSINESS (...2951)</Text>
-              <IconSymbol name="chevron.right" size={16} color="#999999" />
-            </TouchableOpacity>
-            <View style={styles.balanceContainer}>
-              <View style={styles.balanceTextContainer}>
-                <Text style={styles.balanceAmount}>$8,429.67</Text>
-                <Text style={styles.balanceLabel}>Available balance</Text>
-              </View>
-              <View style={styles.verticalLine} />
-            </View>
-          </View>
-        </View>
-
-        {/* Credit Cards */}
-        <View style={styles.accountCard}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardHeaderText}>Credit cards (3)</Text>
-          </View>
-          <View style={styles.cardContent}>
-            <TouchableOpacity style={styles.accountItem}>
-              <Text style={styles.accountName}>Sapphire Preferred (...7384)</Text>
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="arrow.up.right" size={24} color="#0066CC" />
+              <Text style={styles.featureText}>Send money</Text>
               <IconSymbol name="chevron.right" size={16} color="#999999" />
             </TouchableOpacity>
             
-            {/* Credit Card Image */}
-            <View style={styles.creditCard}>
-              <View style={styles.cardBackground}>
-                <View style={styles.cardPattern}>
-                  <View style={styles.cardPatternLine} />
-                  <View style={styles.cardPatternLine} />
-                  <View style={styles.cardPatternLine} />
-                </View>
-                <Text style={styles.cardText}>SAPPHIRE PREFERRED</Text>
-                <View style={styles.cardBottom}>
-                  <Text style={styles.cardVisa}>VISA</Text>
-                  <Text style={styles.cardSignature}>Signature</Text>
-                </View>
-              </View>
-            </View>
-            
-            <View style={styles.balanceContainer}>
-              <View style={styles.balanceTextContainer}>
-                <Text style={styles.balanceAmount}>$1,247.89</Text>
-                <Text style={styles.balanceLabel}>Current balance</Text>
-              </View>
-              <View style={styles.verticalLine} />
-            </View>
-            
-            <View style={styles.paymentStatus}>
-              <IconSymbol name="checkmark.circle.fill" size={16} color="#00AA00" />
-              <Text style={styles.paymentText}>You don't have a payment due right now.</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.accountCard}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardHeaderText}>Freedom Unlimited</Text>
-          </View>
-          <View style={styles.cardContent}>
-            <TouchableOpacity style={styles.accountItem}>
-              <Text style={styles.accountName}>Freedom Unlimited (...5629)</Text>
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="arrow.down.left" size={24} color="#0066CC" />
+              <Text style={styles.featureText}>Request money</Text>
               <IconSymbol name="chevron.right" size={16} color="#999999" />
             </TouchableOpacity>
             
-            <View style={styles.balanceContainer}>
-              <View style={styles.balanceTextContainer}>
-                <Text style={styles.balanceAmount}>$892.45</Text>
-                <Text style={styles.balanceLabel}>Current balance</Text>
-              </View>
-              <View style={styles.verticalLine} />
-            </View>
-            
-            <View style={styles.paymentStatus}>
-              <IconSymbol name="exclamationmark.triangle.fill" size={16} color="#FF4444" />
-              <Text style={styles.paymentText}>Payment due in 5 days - $45.00</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.accountCard}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardHeaderText}>Amazon Prime Rewards</Text>
-          </View>
-          <View style={styles.cardContent}>
-            <TouchableOpacity style={styles.accountItem}>
-              <Text style={styles.accountName}>Amazon Prime (...1847)</Text>
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="arrow.left.arrow.right" size={24} color="#0066CC" />
+              <Text style={styles.featureText}>Transfer between accounts</Text>
               <IconSymbol name="chevron.right" size={16} color="#999999" />
             </TouchableOpacity>
             
-            <View style={styles.balanceContainer}>
-              <View style={styles.balanceTextContainer}>
-                <Text style={styles.balanceAmount}>$0.00</Text>
-                <Text style={styles.balanceLabel}>Current balance</Text>
-              </View>
-              <View style={styles.verticalLine} />
-            </View>
-            
-            <View style={styles.paymentStatus}>
-              <IconSymbol name="checkmark.circle.fill" size={16} color="#00AA00" />
-              <Text style={styles.paymentText}>Account in good standing</Text>
-            </View>
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="creditcard" size={24} color="#0066CC" />
+              <Text style={styles.featureText}>Pay credit card</Text>
+              <IconSymbol name="chevron.right" size={16} color="#999999" />
+            </TouchableOpacity>
           </View>
         </View>
 
-        {/* Link External Accounts */}
-        <TouchableOpacity style={styles.linkAccounts}>
-          <Text style={styles.linkAccountsText}>Link external accounts</Text>
-          <IconSymbol name="chevron.right" size={16} color="#999999" />
-        </TouchableOpacity>
+        {/* Bill Pay Card */}
+        <View style={styles.featureCard}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardHeaderText}>Bill Pay</Text>
+          </View>
+          <View style={styles.cardContent}>
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="doc.text" size={24} color="#0066CC" />
+              <Text style={styles.featureText}>Pay bills</Text>
+              <IconSymbol name="chevron.right" size={16} color="#999999" />
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="plus" size={24} color="#0066CC" />
+              <Text style={styles.featureText}>Add payee</Text>
+              <IconSymbol name="chevron.right" size={16} color="#999999" />
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="calendar" size={24} color="#0066CC" />
+              <Text style={styles.featureText}>Schedule payments</Text>
+              <IconSymbol name="chevron.right" size={16} color="#999999" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Recent Transactions Card */}
+        <View style={styles.featureCard}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardHeaderText}>Recent Transactions</Text>
+          </View>
+          <View style={styles.cardContent}>
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="arrow.up.right" size={24} color="#00AA00" />
+              <View style={styles.transactionInfo}>
+                <Text style={styles.transactionText}>Sent to John Doe</Text>
+                <Text style={styles.transactionDate}>Today, 2:30 PM</Text>
+              </View>
+              <Text style={styles.transactionAmount}>-$150.00</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="arrow.down.left" size={24} color="#0066CC" />
+              <View style={styles.transactionInfo}>
+                <Text style={styles.transactionText}>Deposit from ABC Corp</Text>
+                <Text style={styles.transactionDate}>Yesterday, 9:15 AM</Text>
+              </View>
+              <Text style={styles.transactionAmount}>+$2,500.00</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="creditcard" size={24} color="#FF6B35" />
+              <View style={styles.transactionInfo}>
+                <Text style={styles.transactionText}>Credit card payment</Text>
+                <Text style={styles.transactionDate}>2 days ago</Text>
+              </View>
+              <Text style={styles.transactionAmount}>-$89.50</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Scheduled Payments Card */}
+        <View style={styles.featureCard}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardHeaderText}>Scheduled Payments</Text>
+          </View>
+          <View style={styles.cardContent}>
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="calendar" size={24} color="#0066CC" />
+              <View style={styles.transactionInfo}>
+                <Text style={styles.transactionText}>Electric Bill - ConEd</Text>
+                <Text style={styles.transactionDate}>Due Dec 15, 2024</Text>
+              </View>
+              <Text style={styles.transactionAmount}>$125.30</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.featureItem}>
+              <IconSymbol name="calendar" size={24} color="#0066CC" />
+              <View style={styles.transactionInfo}>
+                <Text style={styles.transactionText}>Internet Bill - Verizon</Text>
+                <Text style={styles.transactionDate}>Due Dec 20, 2024</Text>
+              </View>
+              <Text style={styles.transactionAmount}>$79.99</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -340,7 +322,7 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
     textAlign: 'center',
   },
-  accountsSection: {
+  payTransferSection: {
     flex: 1,
     paddingHorizontal: 20,
     paddingTop: 0,
@@ -356,7 +338,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000000',
   },
-  accountCard: {
+  featureCard: {
     backgroundColor: 'white',
     borderRadius: 12,
     marginBottom: 16,
@@ -377,116 +359,37 @@ const styles = StyleSheet.create({
   cardContent: {
     padding: 16,
   },
-  accountItem: {
+  featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
   },
-  accountName: {
+  featureText: {
+    flex: 1,
     fontSize: 16,
     fontWeight: '500',
     color: '#000000',
-  },
-  balanceContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  balanceTextContainer: {
-    flex: 1,
-  },
-  balanceAmount: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#000000',
-    marginBottom: 4,
-  },
-  balanceLabel: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  verticalLine: {
-    width: 1,
-    height: 40,
-    backgroundColor: '#E5E5E5',
     marginLeft: 16,
   },
-  creditCard: {
-    marginBottom: 16,
-    width: 80,
-    height: 50,
+  transactionInfo: {
+    flex: 1,
+    marginLeft: 16,
   },
-  cardBackground: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 6,
-    padding: 8,
-    height: 50,
-    justifyContent: 'space-between',
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  cardPattern: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    opacity: 0.3,
-  },
-  cardPatternLine: {
-    height: 1,
-    backgroundColor: '#4A90E2',
-    marginVertical: 2,
-    transform: [{ rotate: '15deg' }],
-  },
-  cardText: {
-    color: 'white',
-    fontSize: 8,
-    fontWeight: 'bold',
-    letterSpacing: 0.5,
-    marginTop: 2,
-  },
-  cardBottom: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-  },
-  cardVisa: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  cardSignature: {
-    color: 'white',
-    fontSize: 6,
-  },
-  paymentStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  paymentText: {
-    fontSize: 14,
-    color: '#000000',
-    marginLeft: 8,
-  },
-  linkAccounts: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'white',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-  },
-  linkAccountsText: {
+  transactionText: {
     fontSize: 16,
     fontWeight: '500',
+    color: '#000000',
+  },
+  transactionDate: {
+    fontSize: 14,
+    color: '#666666',
+    marginTop: 2,
+  },
+  transactionAmount: {
+    fontSize: 16,
+    fontWeight: '600',
     color: '#000000',
   },
 });
