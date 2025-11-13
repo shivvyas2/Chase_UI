@@ -10,11 +10,31 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm install
    ```
 
-2. Start the app
+2. Set up environment variables
+
+   ```bash
+   # Copy the example env file
+   cp .env.example .env
+   
+   # Edit .env and add your Clerk publishable key
+   # Get your key from https://dashboard.clerk.com
+   ```
+
+3. Start the app
 
    ```bash
    npx expo start
    ```
+
+## Environment Variables
+
+Create a `.env` file in the root directory with the following:
+
+```
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_publishable_key_here
+```
+
+**Note:** The `.env` file is already in `.gitignore` and won't be committed to version control.
 
 In the output, you'll find options to open the app in a
 

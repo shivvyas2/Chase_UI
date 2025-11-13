@@ -1,15 +1,659 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import React, { useState } from 'react';
-import { ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useAuth } from '@/contexts/AuthContext';
+import { getAllChaseBusinessCards, getCardApplyUrl, getCardDetailsUrl, getCardImageSource, type ChaseBusinessCard } from '@/data/chaseBusinessCards';
+import { useCreditProfile } from '@/hooks/useCreditProfile';
+import {
+  calculateChaseApprovalLikelihood,
+  extractApprovalData,
+  type ChaseCardProfile
+} from '@/services/chaseApprovalService';
+import { trackCardApplication } from '@/services/profileService';
+import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Image, Linking, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Path, Svg } from 'react-native-svg';
 
 export default function CreditJourneyScreen() {
   const [activeTab, setActiveTab] = useState('credit');
   const [activeSubTab, setActiveSubTab] = useState('overview');
+  const [activeScoreType, setActiveScoreType] = useState('fsr');
+  const [accountType, setAccountType] = useState<'personal' | 'business'>('business');
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['55%', '65%'], []);
+  const alertsSnapPoints = useMemo(() => ['70%', '85%'], []);
+  const offersSnapPoints = useMemo(() => ['55%', '65%'], []);
+  
+  // Fetch credit profile and recommendations from API
+  const { profile, experianData, recommendations, businessId, isLoading, error, refresh } = useCreditProfile();
+  const { getToken } = useAuth();
+  
+  // Collapsible cards state
+  const [expandedCards, setExpandedCards] = useState<{[key: string]: boolean}>({
+    scoreChanges: true,
+    creditUtilization: false,
+    paymentHealth: false,
+    industryPayment: false,
+    riskFactors: false,
+    businessObligations: false,
+  });
 
-  const CreditScoreGauge = () => (
-    <View style={styles.gaugeContainer}>
+  const toggleCard = (cardKey: keyof typeof expandedCards) => {
+    setExpandedCards(prev => ({
+      ...prev,
+      [cardKey]: !prev[cardKey],
+    }));
+  };
+
+  // Function to clean markdown formatting from text
+  const cleanMarkdownText = (text: string): string => {
+    if (!text) return '';
+    
+    let cleaned = text;
+    
+    // Remove markdown numbered lists (1., 2., 3., etc.) at start of lines
+    cleaned = cleaned.replace(/^\d+\.\s+/gm, '');
+    
+    // Remove markdown bullet points (-, *, •) at start of lines
+    cleaned = cleaned.replace(/^[-*•]\s+/gm, '');
+    
+    // Remove markdown headers (# ## ###)
+    cleaned = cleaned.replace(/^#+\s+/gm, '');
+    
+    // Remove markdown bold markers (**text**)
+    cleaned = cleaned.replace(/\*\*(.*?)\*\*/g, '$1');
+    
+    // Remove markdown italic markers (*text* or _text_)
+    cleaned = cleaned.replace(/\*(.*?)\*/g, '$1');
+    cleaned = cleaned.replace(/_(.*?)_/g, '$1');
+    
+    // Remove markdown links but keep text [text](url) -> text
+    cleaned = cleaned.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+    
+    // Remove markdown code blocks
+    cleaned = cleaned.replace(/```[\s\S]*?```/g, '');
+    cleaned = cleaned.replace(/`([^`]+)`/g, '$1');
+    
+    // Normalize line breaks - preserve paragraph breaks (double newlines)
+    // Replace 3+ newlines with double newline
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+    
+    // Clean up multiple spaces (but preserve single spaces)
+    cleaned = cleaned.replace(/[ \t]{2,}/g, ' ');
+    
+    // Trim whitespace from each line but preserve line structure
+    cleaned = cleaned.split('\n').map(line => line.trim()).join('\n');
+    
+    // Final trim
+    cleaned = cleaned.trim();
+    
+    return cleaned;
+  };
+
+  // Helper function to get and increment application count
+  const getAndIncrementApplicationCount = async (): Promise<number> => {
+    try {
+      const storageKey = `application_count_${businessId || 'default'}`;
+      const currentCountStr = await AsyncStorage.getItem(storageKey);
+      const currentCount = currentCountStr ? parseInt(currentCountStr, 10) : 0;
+      const newCount = currentCount + 1;
+      await AsyncStorage.setItem(storageKey, newCount.toString());
+      return newCount;
+    } catch (error) {
+      console.error('❌ Failed to track application count:', error);
+      return 1; // Return 1 as fallback if storage fails
+    }
+  };
+
+  const handleApplyNow = async (cardId?: string, applyUrl?: string) => {
+    // Default Chase application URL if no specific URL provided
+    const defaultUrl = 'https://secure.chase.com/web/oao/application/card?sourceCode=GQ5X&action=guest&cellCode=62FG&combo=N&flowVersion=REACT&AOC=5686&RPC=0535&cfgCode=INDBIZCC&channel=C30&applicationId=b1633c89-5954-4830-938b-24b6d6795cf1#/origination/cardDetails/index/indexBusinessCreditCard';
+    const url = applyUrl || defaultUrl;
+    
+    // Track the application for API recommendations (UUID cardIds)
+    // API endpoint: POST /recommendations/{businessId}/applications
+    // Payload: { cardId: string, status: "APPLIED", notes: string, metadata: {} }
+    const isUUID = cardId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cardId);
+    
+    if (isUUID && businessId) {
+      try {
+        const token = await getToken();
+        if (token) {
+          // Get and increment application count
+          const applicationCount = await getAndIncrementApplicationCount();
+          
+          // Call API to track application: POST /recommendations/{businessId}/applications
+          // Status is always "APPLIED" for recommendations
+          // Include application count in metadata
+          const applicationResponse = await trackCardApplication(token, businessId, cardId, '', {
+            applicationCount,
+            timestamp: new Date().toISOString(),
+          });
+          
+          // Log the full response data
+          console.log('✅ Application recorded successfully:', {
+            applicationId: applicationResponse.data.id,
+            cardName: applicationResponse.data.card?.name || 'Unknown Card',
+            status: applicationResponse.data.status,
+            fitScore: applicationResponse.data.fitScore,
+            totalApplications: applicationCount,
+            message: applicationResponse.message,
+          });
+        } else {
+          console.warn('⚠️ No token available, skipping application tracking');
+        }
+      } catch (error) {
+        console.error('❌ Failed to track application:', error);
+        // Continue to open URL even if tracking fails
+      }
+    } else if (cardId && !isUUID) {
+      console.log('ℹ️ Skipping tracking for static card (backend only accepts API recommendation UUIDs):', cardId);
+    } else if (cardId && !businessId) {
+      console.warn('⚠️ No businessId available, skipping application tracking for card:', cardId);
+    }
+    
+    // Open the application URL
+    const supported = await Linking.canOpenURL(url);
+    
+    if (supported) {
+      await Linking.openURL(url);
+    } else {
+      console.error(`Don't know how to open URI: ${url}`);
+    }
+  };
+
+  // Properly destructure all Experian data
+  const experianDataDestructured = useMemo(() => {
+    if (!experianData?.data) return null;
+    
+    const data = experianData.data;
+    
+    return {
+      // Score Information
+      scoreInformation: {
+        commercialScore: data.scoreInformation?.commercialScore || null,
+        fsrScore: data.scoreInformation?.fsrScore || null,
+        commercialScoreFactors: data.scoreInformation?.commercialScoreFactors || [],
+        fsrScoreFactors: data.scoreInformation?.fsrScoreFactors || [],
+        commercialScoreTrends: data.scoreInformation?.commercialScoreTrends || [],
+        fsrScoreTrends: data.scoreInformation?.fsrScoreTrends || [],
+      },
+      
+      // Expanded Credit Summary - all fields
+      expandedCreditSummary: {
+        activeTradelineCount: data.expandedCreditSummary?.activeTradelineCount || 0,
+        allTradelineBalance: data.expandedCreditSummary?.allTradelineBalance || 0,
+        allTradelineCount: data.expandedCreditSummary?.allTradelineCount || 0,
+        averageBalance5Quarters: data.expandedCreditSummary?.averageBalance5Quarters || 0,
+        bankruptcyIndicator: data.expandedCreditSummary?.bankruptcyIndicator || false,
+        collectionBalance: data.expandedCreditSummary?.collectionBalance || 0,
+        collectionCount: data.expandedCreditSummary?.collectionCount || 0,
+        commercialFraudRiskIndicatorCount: data.expandedCreditSummary?.commercialFraudRiskIndicatorCount || 0,
+        currentAccountBalance: data.expandedCreditSummary?.currentAccountBalance || 0,
+        currentDbt: data.expandedCreditSummary?.currentDbt || 0,
+        currentTradelineCount: data.expandedCreditSummary?.currentTradelineCount || 0,
+        highBalance6Months: data.expandedCreditSummary?.highBalance6Months || 0,
+        highestDbt5Quarters: data.expandedCreditSummary?.highestDbt5Quarters || 0,
+        highestDbt6Months: data.expandedCreditSummary?.highestDbt6Months || 0,
+        judgmentCount: data.expandedCreditSummary?.judgmentCount || 0,
+        judgmentIndicator: data.expandedCreditSummary?.judgmentIndicator || false,
+        legalBalance: data.expandedCreditSummary?.legalBalance || 0,
+        lowBalance6Months: data.expandedCreditSummary?.lowBalance6Months || 0,
+        monthlyAverageDbt: data.expandedCreditSummary?.monthlyAverageDbt || 0,
+        mostRecentCollectionDate: data.expandedCreditSummary?.mostRecentCollectionDate || null,
+        mostRecentJudgmentDate: data.expandedCreditSummary?.mostRecentJudgmentDate || null,
+        mostRecentTaxLienDate: data.expandedCreditSummary?.mostRecentTaxLienDate || null,
+        mostRecentUccDate: data.expandedCreditSummary?.mostRecentUccDate || null,
+        ofacMatchWarning: data.expandedCreditSummary?.ofacMatchWarning || null,
+        oldestCollectionDate: data.expandedCreditSummary?.oldestCollectionDate || null,
+        oldestJudgmentDate: data.expandedCreditSummary?.oldestJudgmentDate || null,
+        oldestTaxLienDate: data.expandedCreditSummary?.oldestTaxLienDate || null,
+        oldestUccDate: data.expandedCreditSummary?.oldestUccDate || null,
+        openCollectionBalance: data.expandedCreditSummary?.openCollectionBalance || 0,
+        openCollectionCount: data.expandedCreditSummary?.openCollectionCount || 0,
+        singleHighCredit: data.expandedCreditSummary?.singleHighCredit || 0,
+        taxLienCount: data.expandedCreditSummary?.taxLienCount || 0,
+        taxLienIndicator: data.expandedCreditSummary?.taxLienIndicator || false,
+        tradeCollectionBalance: data.expandedCreditSummary?.tradeCollectionBalance || 0,
+        tradeCollectionCount: data.expandedCreditSummary?.tradeCollectionCount || 0,
+        uccDerogatoryCount: data.expandedCreditSummary?.uccDerogatoryCount || 0,
+        uccFilings: data.expandedCreditSummary?.uccFilings || 0,
+        victimStatementIndicator: data.expandedCreditSummary?.victimStatementIndicator || false,
+      },
+      
+      // Arrays
+      tradePaymentExperiences: Array.isArray(data.tradePaymentExperiences) ? data.tradePaymentExperiences : [],
+      additionalPaymentExperiences: Array.isArray(data.additionalPaymentExperiences) ? data.additionalPaymentExperiences : [],
+      collectionsDetail: Array.isArray(data.collectionsDetail) ? data.collectionsDetail : [],
+      inquiries: Array.isArray(data.inquiries) ? data.inquiries : [],
+      monthlyPaymentTrends: Array.isArray(data.monthlyPaymentTrends) ? data.monthlyPaymentTrends : [],
+      quarterlyPaymentTrends: Array.isArray(data.quarterlyPaymentTrends) ? data.quarterlyPaymentTrends : [],
+      
+      // Industry Payment Trends
+      industryPaymentTrends: {
+        sic: data.industryPaymentTrends?.sic || null,
+        trends: Array.isArray(data.industryPaymentTrends?.trends) ? data.industryPaymentTrends.trends : [],
+      },
+      
+      // Payment Totals
+      paymentTotals: {
+        additionalTradelines: data.paymentTotals?.additionalTradelines || {},
+        combinedTradelines: data.paymentTotals?.combinedTradelines || {},
+        continuouslyReportedTradelines: data.paymentTotals?.continuouslyReportedTradelines || {},
+        newlyReportedTradelines: data.paymentTotals?.newlyReportedTradelines || {},
+        tradelines: data.paymentTotals?.tradelines || {},
+      },
+    };
+  }, [experianData]);
+
+  // Personal credit score data (FICO/VantageScore 3.0 - 300-850 range)
+  const personalScoreData = useMemo(() => {
+    // Try to get personal credit score from experianData
+    const personalScore = experianData?.creditScore || experianData?.score || null;
+    
+    console.log('🔍 Personal Score Data Check:', {
+      personalScore,
+      experianDataCreditScore: experianData?.creditScore,
+      experianDataScore: experianData?.score,
+      accountType
+    });
+    
+    // If we have a score in the 300-850 range, use it
+    if (personalScore && personalScore >= 300 && personalScore <= 850) {
+      return {
+        score: personalScore,
+        scoreType: 'VantageScore® 3.0',
+        provider: 'Experian™',
+        change: 0, // Could be calculated from trends if available
+        changeDirection: 'up' as 'up' | 'down',
+      };
+    }
+    
+    // Fallback: Use a sample personal credit score (720 - Good score)
+    const fallbackData = {
+      score: 720,
+      scoreType: 'VantageScore® 3.0',
+      provider: 'Experian™',
+      change: 0,
+      changeDirection: 'up' as 'up' | 'down',
+    };
+    
+    console.log('✅ Using fallback personal score:', fallbackData);
+    return fallbackData;
+  }, [experianData, accountType]);
+
+  // Use API data or fallback to placeholder data
+  const businessInsights = useMemo(() => {
+    if (experianDataDestructured) {
+      const scoreInfo = experianDataDestructured.scoreInformation;
+      const creditSummary = experianDataDestructured.expandedCreditSummary;
+      
+      return {
+        utilizationPercent: creditSummary.currentAccountBalance && creditSummary.allTradelineBalance
+          ? Math.round((creditSummary.currentAccountBalance / creditSummary.allTradelineBalance) * 100)
+          : 42,
+        tradelines: creditSummary.activeTradelineCount || creditSummary.allTradelineCount || 12,
+        paymentIndex: creditSummary.currentDbt ? 100 - (creditSummary.currentDbt * 2) : 68,
+        collections: creditSummary.collectionCount || creditSummary.openCollectionCount || 1,
+        industryRisk: creditSummary.currentDbt && creditSummary.currentDbt > 20 ? 'High' : creditSummary.currentDbt && creditSummary.currentDbt > 10 ? 'Medium' : 'Low',
+        inquiries30d: experianDataDestructured.inquiries?.filter((inq: any) => {
+          const date = new Date(inq.date || inq.inquiryDate);
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          return date >= thirtyDaysAgo;
+        }).length || 2,
+        score: scoreInfo.fsrScore?.score || scoreInfo.commercialScore?.score || 35,
+        businessId: businessId,
+      };
+    }
+    // Fallback placeholder data
+    return {
+      utilizationPercent: 42,
+      tradelines: 12,
+      paymentIndex: 68,
+      collections: 1,
+      industryRisk: 'Medium',
+      inquiries30d: 2,
+      score: 35,
+      businessId: businessId,
+    };
+  }, [experianDataDestructured, businessId]);
+
+  // Credit utilization data from API or fallback
+  const utilizationData = useMemo(() => {
+    if (experianDataDestructured) {
+      const summary = experianDataDestructured.expandedCreditSummary;
+      // Use API totalHighCredit, but fallback to 50000 if 0 or invalid to ensure proper percentage calculation
+      const apiTotalHighCredit = summary.singleHighCredit || summary.allTradelineBalance || 0;
+      const totalHighCredit = apiTotalHighCredit > 0 ? apiTotalHighCredit : 50000;
+      
+      // Extract account utilizations from tradePaymentExperiences if available
+      let accountUtilizations: any[] = [];
+      if (experianDataDestructured.tradePaymentExperiences && experianDataDestructured.tradePaymentExperiences.length > 0) {
+        accountUtilizations = experianDataDestructured.tradePaymentExperiences
+          .slice(0, 5)
+          .map((trade: any) => {
+            const balance = trade.currentBalance || trade.balance || 0;
+            const limit = trade.highCredit || trade.creditLimit || balance || 1;
+            return {
+              category: trade.tradeName || trade.accountName || 'Account',
+              balance: balance,
+              limit: limit,
+              utilization: limit > 0 ? Math.round((balance / limit) * 100) : 0,
+            };
+          });
+      }
+      
+      const newTotalBalance = 15000;
+      // Calculate utilization percentage: (balance / limit) * 100
+      const newOverallUtilization = Math.round((newTotalBalance / totalHighCredit) * 100);
+      
+      return {
+        overallUtilization: Math.min(newOverallUtilization, 100),
+        totalHighCredit,
+        totalBalance: newTotalBalance,
+        accountsWithCredit: summary.activeTradelineCount || summary.currentTradelineCount || 0,
+        accountUtilizations: accountUtilizations.length > 0 ? accountUtilizations : [
+          { category: 'Total', balance: 15000, limit: totalHighCredit, utilization: newOverallUtilization },
+        ],
+      };
+    }
+    // Fallback dummy data
+    return {
+      overallUtilization: 30,
+      totalHighCredit: 50000,
+      totalBalance: 15000,
+      accountsWithCredit: 3,
+      accountUtilizations: [
+        { category: 'Retail', balance: 8000, limit: 15000, utilization: 53 },
+        { category: 'Services', balance: 7000, limit: 20000, utilization: 35 },
+        { category: 'Manufacturing', balance: 6000, limit: 15000, utilization: 40 },
+      ],
+    };
+  }, [experianDataDestructured]);
+
+  const tradePaymentData = useMemo(() => {
+    if (experianDataDestructured) {
+      const summary = experianDataDestructured.expandedCreditSummary;
+      const trades = experianDataDestructured.tradePaymentExperiences || [];
+      
+      // Calculate on-time payment rate from tradePaymentExperiences
+      let onTimeCount = 0;
+      let totalTrades = 0;
+      let totalDbt = 0;
+      const dbtRanges = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
+      
+      trades.forEach((trade: any) => {
+        if (trade.status || trade.accountStatus) {
+          totalTrades++;
+          const dbt = trade.dbt || trade.daysBeyondTerms || trade.currentDbt || 0;
+          totalDbt += dbt;
+          
+          if (dbt <= 30) {
+            onTimeCount++;
+            dbtRanges['0-30'] += trade.currentBalance || trade.balance || 0;
+          } else if (dbt <= 60) {
+            dbtRanges['31-60'] += trade.currentBalance || trade.balance || 0;
+          } else if (dbt <= 90) {
+            dbtRanges['61-90'] += trade.currentBalance || trade.balance || 0;
+          } else {
+            dbtRanges['90+'] += trade.currentBalance || trade.balance || 0;
+          }
+        }
+      });
+      
+      const onTimePaymentRate = totalTrades > 0 ? Math.round((onTimeCount / totalTrades) * 100) : 92;
+      const averageDaysBeyondTerms = totalTrades > 0 ? Math.round(totalDbt / totalTrades) : summary.monthlyAverageDbt || 12;
+      
+      return {
+        activeTradesCount: 2,
+        closedTradesCount: (summary.allTradelineCount || 0) - (summary.activeTradelineCount || 0),
+        totalTradeBalance: 15000,
+        onTimePaymentRate,
+        averageDaysBeyondTerms,
+        dbtDistribution: [
+          { name: '0-30 days', population: dbtRanges['0-30'] || 15000, color: '#34C759' },
+          { name: '31-60 days', population: 0, color: '#FF9500' },
+          { name: '61-90 days', population: 0, color: '#FF4444' },
+          { name: '90+ days', population: 0, color: '#8E8E93' },
+        ],
+      };
+    }
+    // Fallback dummy data
+    return {
+      activeTradesCount: 2,
+      closedTradesCount: 2,
+      totalTradeBalance: 15000,
+      onTimePaymentRate: 92,
+      averageDaysBeyondTerms: 12,
+      dbtDistribution: [
+        { name: '0-30 days', population: 15000, color: '#34C759' },
+        { name: '31-60 days', population: 0, color: '#FF9500' },
+        { name: '61-90 days', population: 0, color: '#FF4444' },
+        { name: '90+ days', population: 0, color: '#8E8E93' },
+      ],
+    };
+  }, [experianDataDestructured]);
+
+  const industryPaymentData = useMemo(() => {
+    if (experianDataDestructured?.industryPaymentTrends?.trends) {
+      const trends = experianDataDestructured.industryPaymentTrends.trends;
+      const industries = trends.map((trend: any) => {
+        const sic = trend.sic || trend.industryCode || '';
+        const industryName = trend.industryName || trend.name || `Industry ${sic}`;
+        const balance = trend.totalBalance || trend.balance || 0;
+        const onTimeRate = trend.onTimeRate || trend.paymentRate || (trend.currentDbt && trend.currentDbt <= 30 ? 95 : 85);
+        
+        return {
+          name: industryName,
+          balance,
+          onTimeRate: Math.round(onTimeRate),
+        };
+      });
+      
+      if (industries.length > 0) {
+        return { industries };
+      }
+    }
+    // Fallback dummy data
+    return {
+      industries: [
+        { name: 'Retail', balance: 12000, onTimeRate: 95 },
+        { name: 'Services', balance: 6000, onTimeRate: 88 },
+        { name: 'Manufacturing', balance: 3000, onTimeRate: 92 },
+      ],
+    };
+  }, [experianDataDestructured]);
+
+  const riskHighlightsData = useMemo(() => {
+    if (experianDataDestructured) {
+      const summary = experianDataDestructured.expandedCreditSummary;
+      const collectionsDetail = experianDataDestructured.collectionsDetail || [];
+      
+      // Calculate total collection amount
+      const totalCollectionAmount = collectionsDetail.reduce((sum: number, collection: any) => {
+        return sum + (collection.amount || collection.balance || 0);
+      }, 0) || summary.collectionBalance || summary.openCollectionBalance || 0;
+      
+      // Find severely past due accounts (DBT > 90)
+      const severelyPastDue = (experianDataDestructured.tradePaymentExperiences || []).filter((trade: any) => {
+        const dbt = trade.dbt || trade.daysBeyondTerms || trade.currentDbt || 0;
+        return dbt > 90;
+      });
+      
+      return {
+        collectionAccounts: {
+          count: summary.collectionCount || summary.openCollectionCount || collectionsDetail.length || 0,
+          totalAmount: totalCollectionAmount,
+        },
+        severelyPastDueAccounts: {
+          count: severelyPastDue.length,
+          totalBalance: severelyPastDue.reduce((sum: number, trade: any) => {
+            return sum + (trade.currentBalance || trade.balance || 0);
+          }, 0),
+        },
+      };
+    }
+    // Fallback dummy data
+    return {
+      collectionAccounts: { count: 1, totalAmount: 5000 },
+      severelyPastDueAccounts: { count: 0, totalBalance: 0 },
+    };
+  }, [experianDataDestructured]);
+
+  const inquiriesData = useMemo(() => {
+    if (experianDataDestructured?.inquiries && experianDataDestructured.inquiries.length > 0) {
+      const inquiries = experianDataDestructured.inquiries;
+      const total = inquiries.length;
+      
+      // Count recent inquiries (last 30 days)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const recent = inquiries.filter((inq: any) => {
+        const date = new Date(inq.date || inq.inquiryDate || inq.reportDate);
+        return date >= thirtyDaysAgo;
+      }).length;
+      
+      // Determine impact
+      let impact = 'Low';
+      if (recent >= 5) impact = 'High';
+      else if (recent >= 3) impact = 'Medium';
+      
+      // Group by month for last 6 months
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      
+      const byMonthMap: { [key: string]: number } = {};
+      inquiries.forEach((inq: any) => {
+        const date = new Date(inq.date || inq.inquiryDate || inq.reportDate);
+        if (date >= sixMonthsAgo) {
+          const monthKey = `${months[date.getMonth()]}`;
+          byMonthMap[monthKey] = (byMonthMap[monthKey] || 0) + 1;
+        }
+      });
+      
+      // Create array for last 6 months
+      const byMonth = [];
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date();
+        date.setMonth(date.getMonth() - i);
+        const monthName = months[date.getMonth()];
+        byMonth.push({ month: monthName, count: byMonthMap[monthName] || 0 });
+      }
+      
+      return {
+        total,
+        recent,
+        impact,
+        byMonth,
+      };
+    }
+    // Fallback dummy data
+    return {
+      total: 5,
+      recent: 2,
+      impact: 'Low',
+      byMonth: [
+        { month: 'Jun', count: 0 },
+        { month: 'Jul', count: 1 },
+        { month: 'Aug', count: 0 },
+        { month: 'Sep', count: 1 },
+        { month: 'Oct', count: 1 },
+        { month: 'Nov', count: 0 },
+      ],
+    };
+  }, [experianDataDestructured]);
+
+  const obligationsData = useMemo(() => {
+    if (experianDataDestructured) {
+      const trades = experianDataDestructured.tradePaymentExperiences || [];
+      const summary = experianDataDestructured.expandedCreditSummary;
+      
+      // Map trade payment experiences to account format
+      const accounts = trades
+        .filter((trade: any) => trade.status !== 'Closed' && trade.accountStatus !== 'Closed')
+        .slice(0, 10)
+        .map((trade: any) => ({
+          name: trade.tradeName || trade.accountName || trade.creditorName || 'Account',
+          current: trade.currentBalance || trade.balance || 0,
+          limit: trade.highCredit || trade.creditLimit || trade.currentBalance || 0,
+          status: trade.status || trade.accountStatus || 'Active',
+        }));
+      
+      // Calculate recommended limit (typically 2-3x current high credit)
+      const recommendedLimit = summary.singleHighCredit 
+        ? Math.round(summary.singleHighCredit * 2.5)
+        : summary.allTradelineBalance 
+          ? Math.round(summary.allTradelineBalance * 1.5)
+          : 50000;
+      
+      return {
+        accounts: accounts.length > 0 ? accounts : [
+          { name: 'Total Accounts', current: summary.currentAccountBalance || 0, limit: summary.allTradelineBalance || 0, status: 'Active' },
+        ],
+        recommendedLimit,
+        totalBalance: summary.currentAccountBalance || summary.allTradelineBalance || 0,
+      };
+    }
+    // Fallback dummy data
+    return {
+      accounts: [
+        { name: 'Retail Account', current: 8000, limit: 15000, status: 'Active' },
+        { name: 'Services Account', current: 7000, limit: 20000, status: 'Active' },
+        { name: 'Manufacturing Account', current: 6000, limit: 15000, status: 'Active' },
+      ],
+      recommendedLimit: 50000,
+      totalBalance: 21000,
+    };
+  }, [experianData]);
+
+  // Experian business score risk category helper
+  // FSR Score: Higher score = Lower risk (0-100 scale)
+  const getFSRRiskCategory = (score: number): string => {
+    if (score >= 76) return 'Minimal Risk';
+    if (score >= 51) return 'Low Risk';
+    if (score >= 26) return 'Moderate Risk';
+    if (score >= 11) return 'High Risk';
+    return 'Very High Risk';
+  };
+
+  const getIntelliscoreRiskCategory = (score: number): string => {
+    // Intelliscore: Lower score = higher risk, Higher score = lower risk
+    // Inverse scale compared to FSR for display purposes
+    if (score >= 76) return 'Low Risk';
+    if (score >= 51) return 'Moderate Risk';
+    if (score >= 26) return 'High Risk';
+    if (score >= 11) return 'Very High Risk';
+    return 'Minimal Risk';
+  };
+
+  // Personal credit score category (VantageScore/FICO - 300-850 range)
+  const getPersonalScoreCategory = (score: number): string => {
+    if (score >= 750) return 'Excellent';
+    if (score >= 700) return 'Good';
+    if (score >= 650) return 'Fair';
+    if (score >= 600) return 'Poor';
+    return 'Very Poor';
+  };
+
+  const CreditScoreGauge = ({ score = 35, category = 'Moderate Risk', change = 5, scoreType = 'FSR Score', provider = 'Experian', maxScore = 100, changeDirection = 'up' as 'up' | 'down' }) => {
+    const getRiskCategoryColor = (cat: string): string => {
+      // Personal score colors (300-850 range)
+      if (maxScore === 850) {
+        if (cat.includes('Excellent') || cat.includes('Good')) return '#34C759';
+        if (cat.includes('Fair')) return '#FF9500';
+        return '#FF4444'; // Poor or Very Poor
+      }
+      // Business score colors (0-100 range)
+      if (cat.includes('Minimal') || cat.includes('Low')) return '#34C759';
+      if (cat.includes('Moderate')) return '#FF9500';
+      return '#FF4444';
+    };
+
+    return (
+    <View style={styles.gaugeContainer} pointerEvents="box-none">
       <Svg width={400} height={220} viewBox="0 0 400 220">
         {/* Shadow arc (subtle outer glow) */}
         <Path
@@ -31,33 +675,47 @@ export default function CreditJourneyScreen() {
         {/* Progress arc (filled portion) */}
         <Path
           d="M 80 180 A 120 120 0 0 1 320 180"
-          stroke="#FF6B35"
+          stroke={getRiskCategoryColor(category)}
           strokeWidth="12"
           fill="none"
           strokeDasharray="377"
-          strokeDashoffset="250"
+          strokeDashoffset={maxScore === 850 
+            ? `${377 * (1 - (score - 300) / 550)}` // For 300-850 range: (616-300)/550 = 0.575
+            : `${377 * (1 - score / maxScore)}`} // For 0-100 range
           strokeLinecap="round"
         />
         {/* Unfilled outline is preserved by the track arc above. */}
       </Svg>
       
-      <View style={styles.scoreInfo}>
-        <Text style={styles.scoreCategory}>Poor</Text>
-        <Text style={styles.scoreValue}>603</Text>
+      <View style={styles.scoreInfo} pointerEvents="none">
+        <Text style={styles.scoreCategory}>{category}</Text>
+        <Text style={styles.scoreValue}>{score}</Text>
+        {change !== 0 && (
         <View style={styles.scoreChange}>
-          <IconSymbol name="arrow.down" size={20} color="#FF6B35" />
-          <Text style={styles.scoreChangeText}>9 points</Text>
+            <IconSymbol 
+              name={changeDirection === 'down' ? "arrow.down" : "arrow.up"} 
+              size={20} 
+              color={changeDirection === 'down' ? "#FF4444" : "#34C759"} 
+            />
+            <Text style={[styles.scoreChangeText, changeDirection === 'down' && { color: '#FF4444' }]}>
+              {changeDirection === 'down' ? '-' : '+'}{Math.abs(change)} points
+            </Text>
         </View>
+        )}
+        {change === 0 && (
+          <Text style={styles.noChangeText}>No Change</Text>
+        )}
       </View>
       
-      <View style={styles.scoreFooter}>
-        <Text style={styles.scoreProvider}>VantageScore® 3.0 provided by Experian™</Text>
+      <View style={styles.scoreFooter} pointerEvents="none">
+        <Text style={styles.scoreProvider}>{scoreType} • {provider}</Text>
         <TouchableOpacity>
           <IconSymbol name="questionmark.circle" size={16} color="white" />
         </TouchableOpacity>
       </View>
     </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -65,11 +723,8 @@ export default function CreditJourneyScreen() {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton}>
-          <IconSymbol name="chevron.left" size={24} color="white" />
-        </TouchableOpacity>
         
-        <Text style={styles.headerTitle}>Chase Credit Journey</Text>
+        <Text style={styles.headerTitle}>Lumiq Credit Journey</Text>
         
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.notificationButton}>
@@ -78,8 +733,42 @@ export default function CreditJourneyScreen() {
               <Text style={styles.notificationCount}>3</Text>
             </View>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.moreButton}>
-            <IconSymbol name="ellipsis" size={20} color="white" />
+        </View>
+      </View>
+
+      {/* Personal/Business Toggle */}
+      <View style={styles.accountTypeContainer}>
+        <View style={styles.segmentControl}>
+          <TouchableOpacity
+            style={[
+              styles.segmentButton,
+              accountType === 'personal' && styles.segmentButtonActive
+            ]}
+            onPress={() => {
+              console.log('👤 Personal tab clicked');
+              setAccountType('personal');
+            }}
+          >
+            <Text style={[
+              styles.segmentButtonText,
+              accountType === 'personal' && styles.segmentButtonTextActive
+            ]}>
+              Personal
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.segmentButton,
+              accountType === 'business' && styles.segmentButtonActive
+            ]}
+            onPress={() => setAccountType('business')}
+          >
+            <Text style={[
+              styles.segmentButtonText,
+              accountType === 'business' && styles.segmentButtonTextActive
+            ]}>
+              Business
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -117,86 +806,582 @@ export default function CreditJourneyScreen() {
 
       {/* Content based on active tab */}
       {activeTab === 'credit' && (
-        <ScrollView style={styles.creditContent} showsVerticalScrollIndicator={false}>
-          {/* Credit Score Section */}
+        <View style={styles.creditContent}>
+          {/* Top (non-scrollable) */}
           <View style={styles.scoreSection}>
             <View style={styles.scoreHeader}>
-              <Text style={styles.scoreDate}>As of 10/29/25</Text>
+              <View style={styles.scoreHeaderLeft}>
+                {(() => {
+                  // Format date - use current date or date from data
+                  const currentDate = new Date();
+                  const formattedDate = `${(currentDate.getMonth() + 1).toString().padStart(2, '0')}/${currentDate.getDate().toString().padStart(2, '0')}/${currentDate.getFullYear().toString().slice(-2)}`;
+                  
+                  if (accountType === 'business' && profile?.data?.business?.[0]?.name) {
+                    return (
+                      <View>
+                        <Text style={styles.businessName}>
+                          {profile.data.business[0].name}
+                        </Text>
+                        <Text style={styles.scoreDate}>as of {formattedDate}</Text>
+                      </View>
+                    );
+                  }
+                  return (
+                    <Text style={styles.scoreDate}>As of {formattedDate}</Text>
+                  );
+                })()}
+              </View>
               <TouchableOpacity>
                 <Text style={styles.scoreHistory}>See score history {'>'}</Text>
               </TouchableOpacity>
             </View>
             
-            <CreditScoreGauge />
+            {/* Score Type Tabs - Only show for Business */}
+            {accountType === 'business' && (
+            <View style={styles.scoreTypeTabsContainer}>
+              <TouchableOpacity 
+                style={[styles.scoreTypeTab, activeScoreType === 'fsr' && styles.activeScoreTypeTab]}
+                onPress={() => setActiveScoreType('fsr')}
+              >
+                <Text style={[styles.scoreTypeTabText, activeScoreType === 'fsr' && styles.activeScoreTypeTabText]}>
+                  FSR Score
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.scoreTypeTab, activeScoreType === 'intelliscore' && styles.activeScoreTypeTab]}
+                onPress={() => setActiveScoreType('intelliscore')}
+              >
+                <Text style={[styles.scoreTypeTabText, activeScoreType === 'intelliscore' && styles.activeScoreTypeTabText]}>
+                  Intelliscore
+                </Text>
+              </TouchableOpacity>
+            </View>
+            )}
+            
+            {/* Display selected meter */}
+            {isLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#0066CC" />
+                <Text style={styles.loadingText}>Loading credit score...</Text>
+              </View>
+            ) : error ? (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>Error: {error}</Text>
+                <TouchableOpacity onPress={refresh} style={styles.retryButton}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : accountType === 'personal' ? (
+              // Personal Credit Score (VantageScore 3.0 / FICO - 300-850 range)
+              <CreditScoreGauge 
+                score={personalScoreData.score}
+                category={getPersonalScoreCategory(personalScoreData.score)}
+                change={personalScoreData.change}
+                changeDirection={personalScoreData.changeDirection}
+                scoreType={personalScoreData.scoreType}
+                provider={personalScoreData.provider}
+                maxScore={850}
+              />
+            ) : activeScoreType === 'fsr' ? (
+              // Business FSR Score
+              <CreditScoreGauge 
+                score={businessInsights.score || 35}
+                category={getFSRRiskCategory(businessInsights.score || 35)}
+                change={5}
+                scoreType="FSR Score"
+                provider="Experian"
+                maxScore={100}
+              />
+            ) : (
+              // Business Intelliscore
+              <CreditScoreGauge 
+                score={experianDataDestructured?.scoreInformation?.commercialScore?.score || experianDataDestructured?.scoreInformation?.fsrScore?.score || 65}
+                category={getIntelliscoreRiskCategory(experianDataDestructured?.scoreInformation?.commercialScore?.score || experianDataDestructured?.scoreInformation?.fsrScore?.score || 65)}
+                change={8}
+                scoreType="Intelliscore v2"
+                provider="Experian"
+                maxScore={100}
+              />
+            )}
           </View>
 
-          {/* Score Breakdown Card */}
-          <View style={styles.breakdownCard}>
-            <View style={styles.breakdownTabs}>
-              <TouchableOpacity 
-                style={[styles.breakdownTab, activeSubTab === 'overview' && styles.activeBreakdownTab]}
-                onPress={() => setActiveSubTab('overview')}
-              >
-                <Text style={[styles.breakdownTabText, activeSubTab === 'overview' && styles.activeBreakdownTabText]}>
-                  Overview
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.breakdownTab, activeSubTab === 'breakdown' && styles.activeBreakdownTab]}
-                onPress={() => setActiveSubTab('breakdown')}
-              >
-                <Text style={[styles.breakdownTabText, activeSubTab === 'breakdown' && styles.activeBreakdownTabText]}>
-                  Score breakdown
-                </Text>
-              </TouchableOpacity>
+          {/* Bottom (sheet) */}
+          <BottomSheet
+            ref={bottomSheetRef}
+            index={0}
+            snapPoints={snapPoints}
+            backgroundStyle={styles.sheetBg}
+            handleIndicatorStyle={styles.sheetHandle}
+            enablePanDownToClose={false}
+            bottomInset={-40}
+          >
+            <BottomSheetScrollView contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
+              <View style={styles.breakdownCard}>
+            <View style={styles.breakdownTabsContainer}>
+              <View style={styles.segmentedTabs}>
+                <TouchableOpacity 
+                  style={[styles.segmentTab, activeSubTab === 'overview' && styles.activeSegmentTab]}
+                  onPress={() => setActiveSubTab('overview')}
+                >
+                  <Text style={[styles.segmentTabText, activeSubTab === 'overview' && styles.activeSegmentTabText]}>Overview</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.segmentTab, activeSubTab === 'breakdown' && styles.activeSegmentTab]}
+                  onPress={() => setActiveSubTab('breakdown')}
+                >
+                  <Text style={[styles.segmentTabText, activeSubTab === 'breakdown' && styles.activeSegmentTabText]}>Score breakdown</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {activeSubTab === 'overview' && (
               <View style={styles.overviewContent}>
-                <View style={styles.sectionHeader}>
+                {/* Why your score changed */}
+                <TouchableOpacity 
+                  style={styles.sectionHeader}
+                  onPress={() => toggleCard('scoreChanges')}
+                  activeOpacity={0.7}
+                >
                   <Text style={styles.sectionTitle}>Why your score changed</Text>
-                  <TouchableOpacity>
-                    <IconSymbol name="questionmark.circle" size={16} color="#0066CC" />
+                  <View style={styles.headerRightActions}>
+                    <TouchableOpacity>
+                      <IconSymbol name="questionmark.circle" size={16} color="#0066CC" />
+                    </TouchableOpacity>
+                    <IconSymbol 
+                      name="chevron.down" 
+                      size={20} 
+                      color="#666666" 
+                      style={[styles.chevronIcon, expandedCards.scoreChanges && styles.chevronExpanded]} 
+                    />
+                  </View>
+                </TouchableOpacity>
+                
+                {expandedCards.scoreChanges && (
+                  <>
+                    <View style={styles.changeList}>
+                      <View style={styles.changeItem}>
+                        <Text style={styles.changeDescription}>
+                          Credit usage increased on your revolving accounts opened in the last year
+                        </Text>
+                        <View style={styles.changeImpact}>
+                          <IconSymbol name="arrow.up" size={14} color="#34C759" />
+                          <Text style={styles.changePoints}>+4 points</Text>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.changeItem}>
+                        <Text style={styles.changeDescription}>
+                          Card account balances increased
+                        </Text>
+                        <View style={styles.changeImpact}>
+                          <IconSymbol name="arrow.up" size={14} color="#34C759" />
+                          <Text style={styles.changePoints}>+2 points</Text>
+                        </View>
+                      </View>
+                      
+                      <View style={styles.changeItem}>
+                        <Text style={styles.changeDescription}>
+                          Credit usage increased on your accounts
+                        </Text>
+                        <View style={styles.changeImpact}>
+                          <IconSymbol name="arrow.up" size={14} color="#34C759" />
+                          <Text style={styles.changePoints}>+1 point</Text>
+                        </View>
+                      </View>
+                    </View>
+                    
+                  </>
+                )}
+
+                {/* Credit Utilization Card */}
+                <View style={styles.modernCard}>
+                  <TouchableOpacity 
+                    style={styles.cardHeaderWithInfo}
+                    onPress={() => toggleCard('creditUtilization')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.modernCardTitle}>Credit Utilization</Text>
+                    <View style={styles.headerRightActions}>
+                      <TouchableOpacity>
+                        <IconSymbol name="questionmark.circle" size={16} color="#0066CC" />
+                      </TouchableOpacity>
+                      <IconSymbol 
+                        name="chevron.down" 
+                        size={20} 
+                        color="#666666" 
+                        style={[styles.chevronIcon, expandedCards.creditUtilization && styles.chevronExpanded]} 
+                      />
+                    </View>
                   </TouchableOpacity>
-                </View>
-                
-                <View style={styles.changeList}>
-                  <View style={styles.changeItem}>
-                    <Text style={styles.changeDescription}>
-                      Credit usage increased on your revolving accounts opened in the last year
-                    </Text>
-                    <View style={styles.changeImpact}>
-                      <IconSymbol name="arrow.down" size={14} color="#FF6B35" />
-                      <Text style={styles.changePoints}>4 point</Text>
-                    </View>
-                  </View>
                   
-                  <View style={styles.changeItem}>
-                    <Text style={styles.changeDescription}>
-                      Card account balances increased
-                    </Text>
-                    <View style={styles.changeImpact}>
-                      <IconSymbol name="arrow.down" size={14} color="#FF6B35" />
-                      <Text style={styles.changePoints}>2 point</Text>
-                    </View>
-                  </View>
+                  {expandedCards.creditUtilization && (
+                  <>
                   
-                  <View style={styles.changeItem}>
-                    <Text style={styles.changeDescription}>
-                      Credit usage increased on your accounts
+                  <View style={styles.utilizationMainRow}>
+                    <Text style={[styles.utilizationPercentage, { color: utilizationData.overallUtilization > 80 ? '#FF4444' : utilizationData.overallUtilization > 30 ? '#FF9500' : '#34C759' }]}>
+                      {utilizationData.overallUtilization}%
                     </Text>
-                    <View style={styles.changeImpact}>
-                      <IconSymbol name="arrow.down" size={14} color="#FF6B35" />
-                      <Text style={styles.changePoints}>1 point</Text>
+                    <View style={styles.utilizationBarContainer}>
+                      <View style={styles.usageBar}>
+                        <View style={[styles.usageBarFill, { 
+                          width: `${Math.min(utilizationData.overallUtilization, 100)}%`,
+                          backgroundColor: utilizationData.overallUtilization > 80 ? '#FF4444' : utilizationData.overallUtilization > 30 ? '#FF9500' : '#34C759'
+                        }]} />
+                      </View>
+                      <Text style={styles.utilizationRecommendationText}>
+                        {utilizationData.overallUtilization <= 30 ? "You're in a good range." : 'Aim for <30% utilization.'}
+                      </Text>
                     </View>
                   </View>
+
+                  <View style={styles.utilizationStatsGrid}>
+                    <View style={styles.utilizationStatItem}>
+                      <Text style={styles.utilizationStatLabel}>Total High Credit</Text>
+                      <Text style={styles.utilizationStatValue}>${utilizationData.totalHighCredit.toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.utilizationStatItem}>
+                      <Text style={styles.utilizationStatLabel}>Total Balance</Text>
+                      <Text style={styles.utilizationStatValue}>${utilizationData.totalBalance.toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.utilizationStatItemFull}>
+                      <Text style={styles.utilizationStatLabel}>Accounts with Credit</Text>
+                      <Text style={styles.utilizationStatValue}>{utilizationData.accountsWithCredit}</Text>
+                    </View>
+                  </View>
+
+                  {utilizationData.accountUtilizations.length > 0 && (
+                    <View style={styles.topUtilizationAccounts}>
+                      <Text style={styles.subSectionTitle}>Top Accounts by Utilization</Text>
+                      {utilizationData.accountUtilizations.map((account, index) => (
+                        <View key={index} style={styles.accountRow}>
+                          <View>
+                            <Text style={styles.accountCategoryText}>{account.category}</Text>
+                            <Text style={styles.accountBalanceText}>
+                              ${account.balance.toLocaleString()} / ${account.limit.toLocaleString()}
+                            </Text>
+                          </View>
+                          <Text style={[styles.accountUtilizationText, { color: account.utilization > 80 ? '#FF4444' : account.utilization > 30 ? '#FF9500' : '#34C759' }]}>
+                            {account.utilization}%
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  </>
+                  )}
                 </View>
-                
-                <View style={styles.errorMessage}>
-                  <IconSymbol name="exclamationmark.triangle.fill" size={16} color="#FF4444" />
-                  <Text style={styles.errorText}>
-                    We&apos;re having trouble showing some of the score change info for your accounts.
-                  </Text>
+
+                {/* Payment Health Card */}
+                <View style={styles.modernCard}>
+                  <TouchableOpacity 
+                    style={styles.cardHeaderWithInfo}
+                    onPress={() => toggleCard('paymentHealth')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.modernCardTitle}>Payment Health</Text>
+                    <View style={styles.headerRightActions}>
+                      <TouchableOpacity>
+                        <IconSymbol name="questionmark.circle" size={16} color="#0066CC" />
+                      </TouchableOpacity>
+                      <IconSymbol 
+                        name="chevron.down" 
+                        size={20} 
+                        color="#666666" 
+                        style={[styles.chevronIcon, expandedCards.paymentHealth && styles.chevronExpanded]} 
+                      />
+                    </View>
+                  </TouchableOpacity>
+                  
+                  {expandedCards.paymentHealth && (
+                  <>
+
+                  <View style={styles.utilizationStatsGrid}>
+                    <View style={styles.utilizationStatItem}>
+                      <Text style={styles.utilizationStatLabel}>Active Tradelines</Text>
+                      <Text style={styles.utilizationStatValue}>{tradePaymentData.activeTradesCount}</Text>
+                    </View>
+                    <View style={styles.utilizationStatItem}>
+                      <Text style={styles.utilizationStatLabel}>On-Time Rate</Text>
+                      <Text style={styles.utilizationStatValue}>{tradePaymentData.onTimePaymentRate}%</Text>
+                    </View>
+                    <View style={styles.utilizationStatItem}>
+                      <Text style={styles.utilizationStatLabel}>Total Balance</Text>
+                      <Text style={styles.utilizationStatValue}>${tradePaymentData.totalTradeBalance.toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.utilizationStatItem}>
+                      <Text style={styles.utilizationStatLabel}>Avg Days Beyond Terms</Text>
+                      <Text style={styles.utilizationStatValue}>{tradePaymentData.averageDaysBeyondTerms}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.paymentDistributionSection}>
+                    <Text style={styles.subSectionTitle}>Payment Distribution by Days Beyond Terms</Text>
+                    <View style={styles.distributionBars}>
+                      {tradePaymentData.dbtDistribution.map((item, index) => {
+                        const total = tradePaymentData.dbtDistribution.reduce((sum, d) => sum + d.population, 0);
+                        const percentage = total > 0 ? (item.population / total) * 100 : 0;
+                        return (
+                          <View key={index} style={styles.distributionBarItem}>
+                            <View style={styles.distributionBarWrapper}>
+                              <View style={[styles.distributionBarFill, { 
+                                width: `${percentage}%`,
+                                backgroundColor: item.color
+                              }]} />
+                            </View>
+                            <Text style={styles.distributionBarLabel}>{item.name}</Text>
+                            <Text style={styles.distributionBarValue}>${item.population.toLocaleString()}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                  </>
+                  )}
+                </View>
+
+                {/* Industry Payment Card */}
+                <View style={styles.modernCard}>
+                  <TouchableOpacity 
+                    style={styles.cardHeaderWithInfo}
+                    onPress={() => toggleCard('industryPayment')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.modernCardTitle}>Industry Payment Performance</Text>
+                    <View style={styles.headerRightActions}>
+                      <TouchableOpacity>
+                        <IconSymbol name="questionmark.circle" size={16} color="#0066CC" />
+                      </TouchableOpacity>
+                      <IconSymbol 
+                        name="chevron.down" 
+                        size={20} 
+                        color="#666666" 
+                        style={[styles.chevronIcon, expandedCards.industryPayment && styles.chevronExpanded]} 
+                      />
+                    </View>
+                  </TouchableOpacity>
+                  
+                  {expandedCards.industryPayment && (
+                  <>
+
+                  {industryPaymentData.industries.length > 0 ? (
+                    industryPaymentData.industries.map((industry, index) => (
+                      <View key={index} style={styles.industryItem}>
+                        <View style={styles.industryInfo}>
+                          <Text style={styles.industryName}>{industry.name}</Text>
+                          <Text style={styles.industryBalance}>${industry.balance.toLocaleString()}</Text>
+                        </View>
+                        <Text style={styles.industryOnTimeRate}>{industry.onTimeRate}% on-time</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={styles.noDataText}>No industry payment data available</Text>
+                  )}
+                  </>
+                  )}
+                </View>
+
+                {/* Credit Health & Risk Factors */}
+                <View style={styles.modernCard}>
+                  <TouchableOpacity 
+                    style={styles.cardHeaderWithInfo}
+                    onPress={() => toggleCard('riskFactors')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.modernCardTitle}>Credit Health & Risk Factors</Text>
+                    <IconSymbol 
+                      name="chevron.down" 
+                      size={20} 
+                      color="#666666" 
+                      style={[styles.chevronIcon, expandedCards.riskFactors && styles.chevronExpanded]} 
+                    />
+                  </TouchableOpacity>
+                  
+                  {expandedCards.riskFactors && (
+                  <>
+                  <Text style={styles.subSectionTitle}>Key Risk Indicators</Text>
+
+                  <View style={styles.keyFactorsGrid}>
+                    <View style={styles.keyFactorItem}>
+                      <IconSymbol 
+                        name="exclamationmark.triangle.fill" 
+                        size={24} 
+                        color={riskHighlightsData.collectionAccounts.count > 0 ? '#FF4444' : '#34C759'} 
+                      />
+                      <Text style={styles.keyFactorName}>Collections</Text>
+                      <Text style={styles.keyFactorValue}>
+                        {riskHighlightsData.collectionAccounts.count} ($
+                        {riskHighlightsData.collectionAccounts.totalAmount.toLocaleString()})
+                      </Text>
+                      <View style={[styles.statusBadge, riskHighlightsData.collectionAccounts.count > 0 ? styles.badgeWarn : styles.badgeOk]}>
+                        <Text style={styles.statusBadgeText}>
+                          {riskHighlightsData.collectionAccounts.count > 0 ? 'Needs Attention' : 'Good'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.keyFactorItem}>
+                      <IconSymbol 
+                        name="clock.fill" 
+                        size={24} 
+                        color={riskHighlightsData.severelyPastDueAccounts.count > 0 ? '#FF4444' : '#34C759'} 
+                      />
+                      <Text style={styles.keyFactorName}>91+ Days Past Due</Text>
+                      <Text style={styles.keyFactorValue}>
+                        {riskHighlightsData.severelyPastDueAccounts.count} ($
+                        {riskHighlightsData.severelyPastDueAccounts.totalBalance.toLocaleString()})
+                      </Text>
+                      <View style={[styles.statusBadge, riskHighlightsData.severelyPastDueAccounts.count > 0 ? styles.badgeWarn : styles.badgeOk]}>
+                        <Text style={styles.statusBadgeText}>
+                          {riskHighlightsData.severelyPastDueAccounts.count > 0 ? 'Needs Attention' : 'Good'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.keyFactorItem}>
+                      <IconSymbol 
+                        name="doc.text.fill" 
+                        size={24} 
+                        color={tradePaymentData.activeTradesCount > 0 ? '#34C759' : '#8E8E93'} 
+                      />
+                      <Text style={styles.keyFactorName}>Active Tradelines</Text>
+                      <Text style={styles.keyFactorValue}>{tradePaymentData.activeTradesCount}</Text>
+                      <View style={[styles.statusBadge, tradePaymentData.activeTradesCount > 0 ? styles.badgeOk : { backgroundColor: '#8E8E93' }]}>
+                        <Text style={styles.statusBadgeText}>
+                          {tradePaymentData.activeTradesCount > 0 ? 'Good' : 'Insufficient Data'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.keyFactorItem}>
+                      <IconSymbol name="chart.bar.fill" size={24} color="#0066CC" />
+                      <Text style={styles.keyFactorName}>Industry Risk</Text>
+                      <Text style={styles.keyFactorValue}>{businessInsights.industryRisk}</Text>
+                      <View style={[styles.statusBadge, { backgroundColor: businessInsights.industryRisk === 'High' ? '#FF4444' : businessInsights.industryRisk === 'Low' ? '#34C759' : '#FF9500' }]}>
+                        <Text style={styles.statusBadgeText}>{businessInsights.industryRisk}</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.cardHeaderWithInfo}>
+                    <Text style={styles.subSectionTitle}>Credit Inquiries</Text>
+                    <TouchableOpacity>
+                      <IconSymbol name="questionmark.circle" size={16} color="#0066CC" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.inquiriesSummaryRow}>
+                    <View style={styles.inquiryStat}>
+                      <Text style={styles.inquiryStatLabel}>Total</Text>
+                      <Text style={styles.inquiryStatValue}>{inquiriesData.total}</Text>
+                    </View>
+                    <View style={styles.inquiryStat}>
+                      <Text style={styles.inquiryStatLabel}>Recent (30 days)</Text>
+                      <Text style={styles.inquiryStatValue}>{inquiriesData.recent}</Text>
+                    </View>
+                    <View style={styles.inquiryStat}>
+                      <Text style={styles.inquiryStatLabel}>Impact</Text>
+                      <View style={[styles.statusBadge, inquiriesData.impact === 'Low' ? styles.badgeOk : { backgroundColor: '#FF9500' }]}>
+                        <Text style={styles.statusBadgeText}>{inquiriesData.impact}</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <Text style={styles.chartLabel}>Inquiries by Month (Last 6)</Text>
+                  <View style={styles.barChartContainer}>
+                    {inquiriesData.byMonth.map((item, index) => (
+                      <View key={index} style={styles.barColumn}>
+                        <View style={styles.barWrapper}>
+                          <View style={[styles.bar, { height: Math.max(item.count * 20, item.count > 0 ? 5 : 0) }]} />
+                        </View>
+                        <Text style={styles.barLabel}>{item.month}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  </>
+                  )}
+                </View>
+
+                {/* Business Obligations */}
+                <View style={styles.modernCard}>
+                  <TouchableOpacity 
+                    style={styles.cardHeaderWithInfo}
+                    onPress={() => toggleCard('businessObligations')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.modernCardTitle}>Business Obligations</Text>
+                    <View style={styles.headerRightActions}>
+                      <TouchableOpacity>
+                        <IconSymbol name="questionmark.circle" size={16} color="#0066CC" />
+                      </TouchableOpacity>
+                      <IconSymbol 
+                        name="chevron.down" 
+                        size={20} 
+                        color="#666666" 
+                        style={[styles.chevronIcon, expandedCards.businessObligations && styles.chevronExpanded]} 
+                      />
+                    </View>
+                  </TouchableOpacity>
+                  
+                  {expandedCards.businessObligations && (
+                  <>
+
+                  <View style={styles.obligationsSummary}>
+                    <Text style={styles.obligationsTotalValue}>
+                      ${obligationsData.totalBalance.toLocaleString()}
+                    </Text>
+                    <Text style={styles.obligationsSubText}>
+                      Total Balance Across {tradePaymentData.activeTradesCount} Active & {tradePaymentData.closedTradesCount} Closed Line(s)
+                    </Text>
+                  </View>
+
+                  {obligationsData.recommendedLimit > 0 && (
+                    <View style={styles.recommendedLimitBox}>
+                      <Text style={styles.recommendedLimitLabel}>Recommended Credit Limit (Overall)</Text>
+                      <Text style={styles.recommendedLimitValue}>
+                        ${obligationsData.recommendedLimit.toLocaleString()}
+                      </Text>
+                    </View>
+                  )}
+
+                  {obligationsData.accounts.slice(0, 5).map((account, index) => {
+                    const hasLimit = account.limit > 0;
+                    const progressPercentage = hasLimit ? Math.min((account.current / account.limit) * 100, 100) : 0;
+                    return (
+                      <View key={index} style={styles.obligationAccountItem}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={styles.obligationAccountName}>{account.name}</Text>
+                          <View style={[styles.accountStatusTag, account.status === 'Closed' ? styles.closedTag : styles.activeTag]}>
+                            <Text style={[styles.accountStatusTagText, account.status === 'Closed' ? styles.closedTagText : styles.activeTagText]}>{account.status}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.accountDetailsRow}>
+                          <View style={styles.progressBarContainer}>
+                            <View
+                              style={[
+                                styles.progressBarFill,
+                                {
+                                  width: `${Math.min(progressPercentage, 100)}%`,
+                                  opacity: hasLimit ? 1 : 0.2,
+                                  backgroundColor:
+                                    progressPercentage > 70
+                                      ? '#FF4444'
+                                      : progressPercentage > 30
+                                        ? '#FF9500'
+                                        : '#34C759',
+                                },
+                              ]}
+                            />
+                          </View>
+                          <Text style={styles.balanceText}>
+                            ${account.current.toLocaleString()}
+                            {hasLimit ? ` / $${account.limit.toLocaleString()}` : ''}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                  </>
+                  )}
                 </View>
               </View>
             )}
@@ -268,12 +1453,120 @@ export default function CreditJourneyScreen() {
                 </View>
               </View>
             )}
-          </View>
-        </ScrollView>
+              </View>
+              <View style={{ height: 140 }} />
+              </BottomSheetScrollView>
+          </BottomSheet>
+        </View>
       )}
 
       {activeTab === 'alerts' && (
-        <ScrollView style={styles.alertsSection} showsVerticalScrollIndicator={false}>
+        <View style={styles.creditContent}>
+          {/* Top (non-scrollable) - Score Meter */}
+          <View style={styles.scoreSection}>
+            <View style={styles.scoreHeader}>
+              <View style={styles.scoreHeaderLeft}>
+                {(() => {
+                  const currentDate = new Date();
+                  const formattedDate = `${(currentDate.getMonth() + 1).toString().padStart(2, '0')}/${currentDate.getDate().toString().padStart(2, '0')}/${currentDate.getFullYear().toString().slice(-2)}`;
+                  
+                  if (accountType === 'business' && profile?.data?.business?.[0]?.name) {
+                    return (
+                      <View>
+                        <Text style={styles.businessName}>
+                          {profile.data.business[0].name}
+                        </Text>
+                        <Text style={styles.scoreDate}>as of {formattedDate}</Text>
+                      </View>
+                    );
+                  }
+                  return (
+                    <Text style={styles.scoreDate}>As of {formattedDate}</Text>
+                  );
+                })()}
+              </View>
+              <TouchableOpacity>
+                <Text style={styles.scoreHistory}>See score history {'>'}</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Score Type Tabs - Only show for Business */}
+            {accountType === 'business' && (
+              <View style={styles.scoreTypeTabsContainer}>
+                <TouchableOpacity 
+                  style={[styles.scoreTypeTab, activeScoreType === 'fsr' && styles.activeScoreTypeTab]}
+                  onPress={() => setActiveScoreType('fsr')}
+                >
+                  <Text style={[styles.scoreTypeTabText, activeScoreType === 'fsr' && styles.activeScoreTypeTabText]}>
+                    FSR Score
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.scoreTypeTab, activeScoreType === 'intelliscore' && styles.activeScoreTypeTab]}
+                  onPress={() => setActiveScoreType('intelliscore')}
+                >
+                  <Text style={[styles.scoreTypeTabText, activeScoreType === 'intelliscore' && styles.activeScoreTypeTabText]}>
+                    Intelliscore
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            
+            {/* Display selected meter */}
+            {isLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#0066CC" />
+                <Text style={styles.loadingText}>Loading credit score...</Text>
+              </View>
+            ) : error ? (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>Error: {error}</Text>
+                <TouchableOpacity onPress={refresh} style={styles.retryButton}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : accountType === 'personal' ? (
+              <CreditScoreGauge 
+                score={personalScoreData.score}
+                category={getPersonalScoreCategory(personalScoreData.score)}
+                change={personalScoreData.change}
+                changeDirection={personalScoreData.changeDirection}
+                scoreType={personalScoreData.scoreType}
+                provider={personalScoreData.provider}
+                maxScore={850}
+              />
+            ) : activeScoreType === 'fsr' ? (
+              <CreditScoreGauge 
+                score={businessInsights.score || 35}
+                category={getFSRRiskCategory(businessInsights.score || 35)}
+                change={5}
+                scoreType="FSR Score"
+                provider="Experian"
+                maxScore={100}
+              />
+            ) : (
+              <CreditScoreGauge 
+                score={experianDataDestructured?.scoreInformation?.commercialScore?.score || experianDataDestructured?.scoreInformation?.fsrScore?.score || 65}
+                category={getIntelliscoreRiskCategory(experianDataDestructured?.scoreInformation?.commercialScore?.score || experianDataDestructured?.scoreInformation?.fsrScore?.score || 65)}
+                change={8}
+                scoreType="Intelliscore v2"
+                provider="Experian"
+                maxScore={100}
+              />
+            )}
+          </View>
+
+          {/* Bottom (sheet) */}
+        <BottomSheet
+          index={0}
+          snapPoints={alertsSnapPoints}
+          backgroundStyle={styles.sheetBg}
+          handleIndicatorStyle={styles.sheetHandle}
+          enablePanDownToClose={false}
+          bottomInset={-40}
+            topInset={250}
+        >
+          <BottomSheetScrollView contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
           <View style={styles.alertsHeaderList}>
             <Text style={styles.alertInboxTitle}>Alert Inbox</Text>
           </View>
@@ -376,45 +1669,570 @@ export default function CreditJourneyScreen() {
               <Text style={styles.alertRowDate}>08/19/2025</Text>
             </View>
           </View>
-        </ScrollView>
+        </BottomSheetScrollView>
+          </BottomSheet>
+        </View>
       )}
 
       {activeTab === 'offers' && (
-        <ScrollView style={styles.offersSection} showsVerticalScrollIndicator={false}>
+        <View style={styles.creditContent}>
+          {/* Top (non-scrollable) - Score Meter */}
+          <View style={styles.scoreSection}>
+            <View style={styles.scoreHeader}>
+              <View style={styles.scoreHeaderLeft}>
+                {(() => {
+                  const currentDate = new Date();
+                  const formattedDate = `${(currentDate.getMonth() + 1).toString().padStart(2, '0')}/${currentDate.getDate().toString().padStart(2, '0')}/${currentDate.getFullYear().toString().slice(-2)}`;
+                  
+                  if (accountType === 'business' && profile?.data?.business?.[0]?.name) {
+                    return (
+                      <View>
+                        <Text style={styles.businessName}>
+                          {profile.data.business[0].name}
+                        </Text>
+                        <Text style={styles.scoreDate}>as of {formattedDate}</Text>
+                      </View>
+                    );
+                  }
+                  return (
+                    <Text style={styles.scoreDate}>As of {formattedDate}</Text>
+                  );
+                })()}
+              </View>
+              <TouchableOpacity>
+                <Text style={styles.scoreHistory}>See score history {'>'}</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Score Type Tabs - Only show for Business */}
+            {accountType === 'business' && (
+              <View style={styles.scoreTypeTabsContainer}>
+                <TouchableOpacity 
+                  style={[styles.scoreTypeTab, activeScoreType === 'fsr' && styles.activeScoreTypeTab]}
+                  onPress={() => setActiveScoreType('fsr')}
+                >
+                  <Text style={[styles.scoreTypeTabText, activeScoreType === 'fsr' && styles.activeScoreTypeTabText]}>
+                    FSR Score
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.scoreTypeTab, activeScoreType === 'intelliscore' && styles.activeScoreTypeTab]}
+                  onPress={() => setActiveScoreType('intelliscore')}
+                >
+                  <Text style={[styles.scoreTypeTabText, activeScoreType === 'intelliscore' && styles.activeScoreTypeTabText]}>
+                    Intelliscore
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            
+            {/* Display selected meter */}
+            {isLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#0066CC" />
+                <Text style={styles.loadingText}>Loading credit score...</Text>
+              </View>
+            ) : error ? (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>Error: {error}</Text>
+                <TouchableOpacity onPress={refresh} style={styles.retryButton}>
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : accountType === 'personal' ? (
+              <CreditScoreGauge 
+                score={personalScoreData.score}
+                category={getPersonalScoreCategory(personalScoreData.score)}
+                change={personalScoreData.change}
+                changeDirection={personalScoreData.changeDirection}
+                scoreType={personalScoreData.scoreType}
+                provider={personalScoreData.provider}
+                maxScore={850}
+              />
+            ) : activeScoreType === 'fsr' ? (
+              <CreditScoreGauge 
+                score={businessInsights.score || 35}
+                category={getFSRRiskCategory(businessInsights.score || 35)}
+                change={5}
+                scoreType="FSR Score"
+                provider="Experian"
+                maxScore={100}
+              />
+            ) : (
+              <CreditScoreGauge 
+                score={experianDataDestructured?.scoreInformation?.commercialScore?.score || experianDataDestructured?.scoreInformation?.fsrScore?.score || 65}
+                category={getIntelliscoreRiskCategory(experianDataDestructured?.scoreInformation?.commercialScore?.score || experianDataDestructured?.scoreInformation?.fsrScore?.score || 65)}
+                change={8}
+                scoreType="Intelliscore v2"
+                provider="Experian"
+                maxScore={100}
+              />
+            )}
+          </View>
+
+          {/* Bottom (sheet) */}
+        <BottomSheet
+            ref={bottomSheetRef}
+          index={0}
+          snapPoints={offersSnapPoints}
+          backgroundStyle={styles.sheetBg}
+          handleIndicatorStyle={styles.sheetHandle}
+          enablePanDownToClose={false}
+          bottomInset={-40}
+        >
+          <BottomSheetScrollView contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
           <View style={styles.offersHeader}>
-            <Text style={styles.offersTitle}>Credit Offers</Text>
-            <Text style={styles.offersSubtitle}>Personalized offers to help improve your credit</Text>
+            <Text style={styles.offersTitle}>Business Credit Offers</Text>
+            <Text style={styles.offersSubtitle}>
+              {isLoading 
+                ? 'Loading recommendations...' 
+                : recommendations?.recommendations?.length 
+                  ? `You have ${recommendations.recommendations.length} personalized recommendations`
+                  : 'You are qualified for Chase Business cards'}
+            </Text>
+            {!isLoading && error && (
+              <TouchableOpacity onPress={refresh} style={styles.retryButton}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
-          {/* Offer Cards */}
-          <View style={styles.offerCard}>
-            <View style={styles.offerHeader}>
-              <IconSymbol name="star.fill" size={20} color="#FFD700" />
-              <Text style={styles.offerType}>Recommended</Text>
+          {isLoading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#0066CC" />
+              <Text style={styles.loadingText}>Loading recommendations...</Text>
             </View>
-            <Text style={styles.offerTitle}>Credit Limit Increase</Text>
-            <Text style={styles.offerDescription}>
-              You&apos;re pre-approved for a $2,000 credit limit increase on your Sapphire Preferred card.
-            </Text>
-            <TouchableOpacity style={styles.offerButton}>
-              <Text style={styles.offerButtonText}>Apply Now</Text>
-            </TouchableOpacity>
-          </View>
+          ) : error ? (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>Error loading recommendations: {error}</Text>
+              <TouchableOpacity onPress={refresh} style={styles.retryButton}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {/* AI Recommendation Summary - Compact */}
+              {(() => {
+                const allChaseCards = getAllChaseBusinessCards();
+                const apiRecommendations = recommendations?.recommendations || [];
+                const totalCards = apiRecommendations.length + allChaseCards.length;
+                
+                return totalCards > 0 && (
+                <View style={styles.aiSummaryCard}>
+                  <View style={styles.aiSummaryHeader}>
+                    <View style={styles.aiSummaryHeaderLeft}>
+                      <IconSymbol name="sparkles" size={20} color="#0066CC" />
+                      <Text style={styles.aiSummaryTitle}>
+                          {apiRecommendations.length > 0 
+                            ? `${apiRecommendations.length} Personalized + ${allChaseCards.length} Available Cards`
+                            : `${allChaseCards.length} Chase Business Cards Available`}
+                      </Text>
+                    </View>
+                      {recommendations?.score && (
+                      <View style={styles.scoreBadge}>
+                          <Text style={styles.scoreText}>{recommendations.score}/100</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+                );
+              })()}
 
-          <View style={styles.offerCard}>
-            <View style={styles.offerHeader}>
-              <IconSymbol name="gift.fill" size={20} color="#0066CC" />
-              <Text style={styles.offerType}>Special Offer</Text>
-            </View>
-            <Text style={styles.offerTitle}>Balance Transfer</Text>
-            <Text style={styles.offerDescription}>
-              Transfer high-interest balances with 0% APR for 18 months. Save on interest payments.
-            </Text>
-            <TouchableOpacity style={styles.offerButton}>
-              <Text style={styles.offerButtonText}>Learn More</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
+              {/* Combine API recommendations with all Chase business cards */}
+              {(() => {
+                // Get all Chase business cards
+                const allChaseCards = getAllChaseBusinessCards();
+                
+                // Merge API recommendations with all cards
+                const apiRecommendations = recommendations?.recommendations || [];
+                // API recommendations use cardId, static cards use both cardId and id - check all
+                const apiCardIds = new Set(apiRecommendations.map((r: any) => r.cardId || r.id));
+                
+                // Helper function to match API recommendation cardName with static card
+                const matchCardByName = (cardName: string): ChaseBusinessCard | undefined => {
+                  if (!cardName) return undefined;
+                  // Normalize card names by removing "Chase" prefix and extra spaces
+                  const normalizeName = (name: string): string => {
+                    return name.toLowerCase()
+                      .replace(/^chase\s+/i, '') // Remove "Chase" prefix
+                      .trim()
+                      .replace(/\s+/g, ' '); // Normalize spaces
+                  };
+                  
+                  const normalizedApiName = normalizeName(cardName);
+                  
+                  return allChaseCards.find(card => {
+                    const normalizedCardName = normalizeName(card.cardName);
+                    // Check for exact match after normalization
+                    return normalizedCardName === normalizedApiName;
+                  });
+                };
+                
+                // Enrich API recommendations with static card data
+                const enrichedRecommendations = apiRecommendations.map((rec: any) => {
+                  const matchedCard = matchCardByName(rec.cardName);
+                  if (matchedCard) {
+                    // Merge API recommendation with static card data
+                    // API data (cardId, cardName, reason, suggestedUsage, fitScore) takes precedence
+                    const enriched = {
+                      ...matchedCard,
+                      ...rec, // API data overrides static data
+                      // Preserve static card's id if API doesn't have one
+                      id: rec.id || matchedCard.id,
+                      // Ensure cardId is set (use API cardId if available, otherwise static cardId)
+                      cardId: rec.cardId || matchedCard.cardId || matchedCard.id,
+                      // Preserve API cardName
+                      cardName: rec.cardName || matchedCard.cardName,
+                    };
+                    console.log(`✅ Enriched recommendation: ${rec.cardName} with static card data`);
+                    return enriched;
+                  }
+                  console.log(`ℹ️ No static card match found for: ${rec.cardName}`);
+                  return rec;
+                });
+                
+                // Add all Chase business cards that aren't already in recommendations
+                // Also check by cardName to avoid duplicates when API recommendations are enriched with static card data
+                const enrichedCardNames = new Set(
+                  enrichedRecommendations.map((r: any) => r.cardName?.toLowerCase().trim())
+                );
+                const mergedCards: (ChaseBusinessCard | any)[] = [...enrichedRecommendations];
+                allChaseCards.forEach(card => {
+                  // Check if card is already in API recommendations by comparing:
+                  // 1. cardId/id match
+                  // 2. cardName match (to catch enriched recommendations)
+                  const cardIdToCheck = card.cardId || card.id;
+                  const cardNameLower = card.cardName?.toLowerCase().trim();
+                  const isDuplicate = 
+                    apiCardIds.has(cardIdToCheck) || 
+                    apiCardIds.has(card.id) ||
+                    (cardNameLower && enrichedCardNames.has(cardNameLower));
+                  
+                  if (!isDuplicate) {
+                    mergedCards.push(card);
+                  }
+                });
+                
+                // Extract approval data once for all cards
+                const approvalData = extractApprovalData(profile, experianData, recommendations);
+                
+                // Calculate approval scores for all cards and sort by score (highest first)
+                const cardsWithScores = mergedCards.map((rec: any) => {
+                  const cardProfile: ChaseCardProfile = {
+                    cardName: rec.cardName || rec.name || 'Business Credit Card',
+                    difficultyRating: rec.difficultyRating || 'Medium',
+                    minPersonalFico: rec.minPersonalFico || 680,
+                    minBusinessRevenue: rec.minBusinessRevenue,
+                    minBusinessAge: rec.minBusinessAge || 6,
+                    expectedApprovalCLRange: rec.expectedApprovalCLRange,
+                    subDifficultyIndex: rec.subDifficultyIndex,
+                    rewardCategoryAlignment: rec.rewardCategoryAlignment || [],
+                    underwriterToleranceLevel: rec.underwriterToleranceLevel || 'Medium',
+                  };
+                  
+                  const approvalResult = calculateChaseApprovalLikelihood(
+                    approvalData.personal,
+                    approvalData.business,
+                    approvalData.spend,
+                    cardProfile
+                  );
+                  
+                  return {
+                    ...rec,
+                    approvalResult,
+                    approvalScore: approvalResult.likelihoodScore,
+                  };
+                });
+                
+                // Separate API recommendations from static cards
+                const apiCards: any[] = [];
+                const staticCards: any[] = [];
+                
+                cardsWithScores.forEach((card: any) => {
+                  // Check if it's an API recommendation (UUID cardId)
+                  const isApiRecommendation = card.cardId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(card.cardId);
+                  if (isApiRecommendation) {
+                    apiCards.push(card);
+                  } else {
+                    // For static cards, filter out "Declined by Rule"
+                    if (card.approvalResult?.recommendation !== 'Declined by Rule') {
+                      staticCards.push(card);
+                    }
+                  }
+                });
+                
+                // Sort API recommendations by fitScore (descending), then by approval score
+                apiCards.sort((a, b) => {
+                  const aFitScore = a.fitScore || 0;
+                  const bFitScore = b.fitScore || 0;
+                  if (bFitScore !== aFitScore) {
+                    return bFitScore - aFitScore;
+                  }
+                  return b.approvalScore - a.approvalScore;
+                });
+                
+                // Sort static cards by approval score (descending), then by fitScore
+                staticCards.sort((a, b) => {
+                  if (b.approvalScore !== a.approvalScore) {
+                    return b.approvalScore - a.approvalScore;
+                  }
+                  const aFitScore = a.fitScore || 0;
+                  const bFitScore = b.fitScore || 0;
+                  return bFitScore - aFitScore;
+                });
+                
+                // Combine: API recommendations first, then static cards
+                const filteredCards = [...apiCards, ...staticCards];
+                
+                return filteredCards.length > 0 ? (
+                  filteredCards.map((rec: any, index: number) => {
+                    // Use the pre-calculated approval result
+                    const approvalResult = rec.approvalResult;
+                    const displayFitScore = rec.fitScore || (approvalResult.likelihoodScore / 100);
+                  
+                  // Use cardId as key (unique UUID for API recommendations, or id for static cards)
+                  // Fallback to index if neither exists
+                  const uniqueKey = rec.cardId || rec.id || `card-${index}`;
+                  
+                  return (
+                  <View key={uniqueKey} style={styles.businessOfferCard}>
+                    {/* Top Recommendation Badge for highest scores */}
+                    {index === 0 && approvalResult.likelihoodScore >= 75 && (
+                      <View style={styles.topRecommendationBadge}>
+                        <IconSymbol name="star.fill" size={16} color="#FFD700" />
+                        <Text style={styles.topRecommendationText}>Top Recommendation</Text>
+                      </View>
+                    )}
+                    
+                    <View style={{flexDirection: 'row', alignItems: 'flex-start'}}>
+                      {rec.cardImage ? (
+                        <Image source={{ uri: rec.cardImage }} style={styles.cardImage} />
+                      ) : (
+                        <Image
+                          source={getCardImageSource(rec.id || '', index)}
+                          style={styles.cardImage}
+                        />
+                      )}
+                      <View style={{flex: 1}}>
+                        <View style={styles.businessCardHeader}>
+                          {(rec.fitScore || displayFitScore) && (
+                            <View style={styles.fitScoreBadge}>
+                              <Text style={styles.fitScoreText}>{((rec.fitScore || displayFitScore) * 100).toFixed(0)}% Match</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.businessCardTitle}>{rec.cardName || rec.name || 'Business Credit Card'}</Text>
+                        <Text style={styles.businessCardSubtitle}>Chase Business Credit Card</Text>
+                      </View>
+                    </View>
+                    
+                    {/* Approval Likelihood Score - Temporarily Removed */}
+                    {/* <View style={styles.approvalScoreCard}>
+                      <View style={styles.approvalScoreHeader}>
+                        <View style={styles.approvalScoreHeaderLeft}>
+                          <IconSymbol name="chart.bar.fill" size={18} color="#0066CC" />
+                          <Text style={styles.approvalScoreTitle}>Approval Likelihood</Text>
+                        </View>
+                        <View style={[
+                          styles.approvalScoreBadge,
+                          approvalResult.likelihoodScore >= 75 && { backgroundColor: '#34C759' },
+                          approvalResult.likelihoodScore >= 55 && approvalResult.likelihoodScore < 75 && { backgroundColor: '#FF9500' },
+                          approvalResult.likelihoodScore < 55 && { backgroundColor: '#FF4444' },
+                        ]}>
+                          <Text style={styles.approvalScoreValue}>{approvalResult.likelihoodScore}/100</Text>
+                        </View>
+                      </View>
+                      <View style={styles.approvalRecommendation}>
+                        <Text style={[
+                          styles.approvalRecommendationText,
+                          approvalResult.recommendation === 'Strongly Recommended' && { color: '#34C759' },
+                          approvalResult.recommendation === 'Viable with Conditions' && { color: '#FF9500' },
+                          approvalResult.recommendation === 'Not Recommended' && { color: '#FF4444' },
+                        ]}>
+                          {approvalResult.recommendation}
+                        </Text>
+                      </View>
+                      {approvalResult.cardSpecificDetails?.expectedApprovalLimit && (
+                        <Text style={styles.expectedLimitText}>
+                          Expected Credit Limit: ${approvalResult.cardSpecificDetails.expectedApprovalLimit.min.toLocaleString()} - ${approvalResult.cardSpecificDetails.expectedApprovalLimit.max.toLocaleString()}
+                        </Text>
+                      )}
+                    </View> */}
+
+                    {/* Positive Factors - Temporarily Removed */}
+                    {/* {approvalResult.positiveFactors.length > 0 && (
+                      <View style={styles.factorsContainer}>
+                        <Text style={styles.factorsTitle}>Positive Factors</Text>
+                        {approvalResult.positiveFactors.slice(0, 3).map((factor, idx) => (
+                          <View key={idx} style={styles.factorItem}>
+                            <IconSymbol name="checkmark.circle.fill" size={14} color="#34C759" />
+                            <Text style={styles.factorText}>{factor}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )} */}
+
+                    {/* Risk Factors - Temporarily Removed */}
+                    {/* {approvalResult.riskFactors.length > 0 && (
+                      <View style={styles.factorsContainer}>
+                        <Text style={styles.factorsTitle}>Risk Factors</Text>
+                        {approvalResult.riskFactors.slice(0, 3).map((factor, idx) => (
+                          <View key={idx} style={styles.factorItem}>
+                            <IconSymbol name="exclamationmark.triangle.fill" size={14} color="#FF4444" />
+                            <Text style={styles.factorText}>{factor}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )} */}
+                    
+                    <View style={styles.offerDetails}>
+                      {/* Key Highlights - Collapsible */}
+                      {rec.reason && (
+                        <TouchableOpacity 
+                          style={styles.collapsibleSection}
+                          onPress={() => {
+                            const key = `reason_${index}`;
+                            setExpandedCards((prev: any) => ({
+                              ...prev,
+                              [key]: !prev[key],
+                            }));
+                          }}>
+                          <View style={styles.collapsibleHeader}>
+                            <View style={styles.collapsibleHeaderLeft}>
+                              <IconSymbol name="lightbulb.fill" size={16} color="#0066CC" />
+                              <Text style={styles.collapsibleTitle}>Why Recommended</Text>
+                            </View>
+                            <IconSymbol 
+                              name={expandedCards[`reason_${index}` as keyof typeof expandedCards] ? 'chevron.up' : 'chevron.down'} 
+                              size={16} 
+                              color="#666" 
+                            />
+                          </View>
+                          {expandedCards[`reason_${index}` as keyof typeof expandedCards] && (
+                            <Text style={styles.collapsibleText} numberOfLines={0}>
+                              {cleanMarkdownText(rec.reason)}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Bonus Offer - Always Visible */}
+                      {rec.bonusOffer && (
+                        <View style={styles.bonusRow}>
+                          <View style={styles.bonusIconContainer}>
+                            <IconSymbol name="gift.fill" size={20} color="#0066CC" />
+                          </View>
+                          <View style={styles.bonusContent}>
+                            <Text style={styles.bonusAmount}>{rec.bonusOffer.amount || 'Earn $750'}</Text>
+                            <Text style={styles.bonusCondition}>{rec.bonusOffer.condition || 'After qualifying purchases'}</Text>
+                          </View>
+                        </View>
+                      )}
+                      
+                      {/* Top 3 Benefits Only */}
+                      {rec.benefits && rec.benefits.length > 0 && (
+                        <View style={styles.benefitsList}>
+                          {rec.benefits.slice(0, 3).map((benefit: string, idx: number) => (
+                            <View key={idx} style={styles.benefitItem}>
+                              <IconSymbol name="checkmark.circle.fill" size={14} color="#34C759" />
+                              <Text style={styles.benefitText}>{benefit}</Text>
+                            </View>
+                          ))}
+                          {rec.benefits.length > 3 && (
+                            <Text style={styles.moreBenefitsText}>+{rec.benefits.length - 3} more benefits</Text>
+                          )}
+                        </View>
+                      )}
+
+                      {/* Suggested Usage - Collapsible */}
+                      {rec.suggestedUsage && (
+                        <TouchableOpacity 
+                          style={styles.collapsibleSection}
+                          onPress={() => {
+                            const key = `usage_${index}`;
+                            setExpandedCards((prev: any) => ({
+                              ...prev,
+                              [key]: !prev[key],
+                            }));
+                          }}>
+                          <View style={styles.collapsibleHeader}>
+                            <View style={styles.collapsibleHeaderLeft}>
+                              <IconSymbol name="info.circle.fill" size={16} color="#FF9500" />
+                              <Text style={styles.collapsibleTitle}>Usage Tips</Text>
+                            </View>
+                            <IconSymbol 
+                              name={expandedCards[`usage_${index}` as keyof typeof expandedCards] ? 'chevron.up' : 'chevron.down'} 
+                              size={16} 
+                              color="#666" 
+                            />
+                          </View>
+                          {expandedCards[`usage_${index}` as keyof typeof expandedCards] && (
+                            <Text style={styles.collapsibleText} numberOfLines={0}>
+                              {cleanMarkdownText(rec.suggestedUsage)}
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    <View style={styles.buttonRow}>
+                      <TouchableOpacity 
+                        style={styles.offerButton} 
+                        onPress={() => {
+                          // Use cardId (preferred) or fallback to id
+                          // API recommendations have cardId (UUID), static cards have cardId (string)
+                          const cardId = rec.cardId || rec.id;
+                          const cardName = rec.cardName || rec.name;
+                          if (!cardId) {
+                            console.warn('⚠️ No cardId or id found for card:', cardName);
+                          }
+                          // Get card-specific application URL
+                          const applyUrl = rec.applyUrl || getCardApplyUrl(cardId, cardName) || undefined;
+                          handleApplyNow(cardId, applyUrl);
+                        }}
+                      >
+                        <Text style={styles.offerButtonText}>Apply Now</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={styles.detailsButton}
+                        onPress={async () => {
+                          const detailsUrl = rec.detailsUrl || getCardDetailsUrl(rec.cardId || rec.id, rec.cardName || rec.name);
+                          if (detailsUrl) {
+                            const supported = await Linking.canOpenURL(detailsUrl);
+                            if (supported) {
+                              await Linking.openURL(detailsUrl);
+                            } else {
+                              console.error(`Don't know how to open URI: ${detailsUrl}`);
+                            }
+                          } else {
+                            console.warn('⚠️ No details URL found for card:', rec.cardName || rec.name);
+                          }
+                        }}
+                      >
+                        <Text style={styles.detailsButtonText}>Details</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  );
+                })
+                ) : null;
+              })()}
+              
+              {/* Show message if no cards available at all */}
+              {!isLoading && !error && (!recommendations?.recommendations || recommendations.recommendations.length === 0) && getAllChaseBusinessCards().length === 0 && (
+                <View style={styles.noRecommendationsContainer}>
+                  <IconSymbol name="info.circle" size={48} color="#8E8E93" />
+                  <Text style={styles.noRecommendationsText}>No credit cards available</Text>
+                  <Text style={styles.noRecommendationsSubtext}>
+                    Please check back later or contact support for assistance.
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
+        </BottomSheetScrollView>
+          </BottomSheet>
+        </View>
       )}
     </SafeAreaView>
   );
@@ -428,9 +2246,43 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    position: 'relative',
+    marginBottom: 8,
+  },
+  accountTypeContainer: {
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  segmentControl: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 8,
+    padding: 4,
+    width: '100%',
+    maxWidth: 300,
+  },
+  segmentButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentButtonActive: {
+    backgroundColor: 'white',
+  },
+  segmentButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  segmentButtonTextActive: {
+    color: '#1A237E',
   },
   backButton: {
     padding: 8,
@@ -445,7 +2297,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   notificationButton: {
-    position: 'relative',
+    position: 'absolute',
+    left: 60,
     padding: 8,
   },
   notificationBadge: {
@@ -557,13 +2410,21 @@ const styles = StyleSheet.create({
   },
   scoreSection: {
     paddingHorizontal: 16,
-    paddingBottom: 20,
+    paddingBottom: 48,
   },
   scoreHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 8,
+  },
+  scoreHeaderLeft: {
+    flex: 1,
+  },
+  businessName: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
   scoreDate: {
     color: 'white',
@@ -576,8 +2437,49 @@ const styles = StyleSheet.create({
   gaugeContainer: {
     alignItems: 'center',
     marginTop: -60,
-    marginBottom: 2,
+    marginBottom: 16,
     paddingVertical: 10,
+  },
+  metersContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    marginBottom: 8,
+  },
+  meterWrapper: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 5,
+  },
+  scoreTypeTabsContainer: {
+    flexDirection: 'row',
+    position: 'relative',
+    zIndex: 0,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    marginTop: 10,
+  },
+  scoreTypeTab: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    marginHorizontal: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  activeScoreTypeTab: {
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#0066CC',
+  },
+  scoreTypeTabText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  activeScoreTypeTabText: {
+    color: '#0066CC',
+    fontWeight: '600',
   },
   scoreInfo: {
     alignItems: 'center',
@@ -600,66 +2502,246 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scoreChangeText: {
-    color: '#FF6B35',
+    color: '#34C759',
     fontSize: 18,
     marginLeft: 4,
     fontWeight: '600',
+  },
+  noChangeText: {
+    color: '#999999',
+    fontSize: 16,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  approvalScoreCard: {
+    backgroundColor: '#F0F9FF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#B3D9FF',
+  },
+  approvalScoreHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  approvalScoreHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  approvalScoreTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0066CC',
+    marginLeft: 8,
+  },
+  approvalScoreBadge: {
+    backgroundColor: '#0066CC',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  approvalScoreValue: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  approvalRecommendation: {
+    marginTop: 4,
+  },
+  approvalRecommendationText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0066CC',
+  },
+  expectedLimitText: {
+    fontSize: 13,
+    color: '#666666',
+    marginTop: 8,
+    fontWeight: '500',
+  },
+  factorsContainer: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  factorsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333333',
+    marginBottom: 8,
+  },
+  factorItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  factorText: {
+    fontSize: 13,
+    color: '#333333',
+    marginLeft: 8,
+    flex: 1,
+  },
+  topRecommendationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF9E6',
+    borderWidth: 1,
+    borderColor: '#FFD700',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  topRecommendationText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B8860B',
+    marginLeft: 6,
   },
   scoreFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 10,
-    marginBottom: 40,
+    marginBottom: 64,
   },
   scoreProvider: {
     color: 'white',
     fontSize: 14,
     marginRight: 8,
   },
+  sheetBg: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+  },
+  sheetHandle: {
+    backgroundColor: '#E5E5E5',
+  },
+  sheetContent: {
+    paddingHorizontal: 0,
+    paddingBottom: 200,
+  },
   breakdownCard: {
     backgroundColor: 'white',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingTop: 20,
+    paddingTop: 12,
     paddingHorizontal: 16,
     paddingBottom: 20,
-    marginTop: -20,
+    marginTop: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
   },
-  breakdownTabs: {
+  breakdownTabsContainer: {
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  segmentedTabs: {
     flexDirection: 'row',
-    marginBottom: 20,
+    backgroundColor: '#F2F4F7',
+    borderRadius: 24,
+    padding: 4,
   },
-  breakdownTab: {
-    paddingHorizontal: 16,
+  segmentTab: {
+    paddingHorizontal: 18,
     paddingVertical: 8,
-    marginRight: 8,
     borderRadius: 20,
   },
-  activeBreakdownTab: {
-    backgroundColor: '#0066CC',
+  activeSegmentTab: {
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#0066CC',
   },
-  breakdownTabText: {
+  segmentTabText: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#666666',
   },
-  activeBreakdownTabText: {
+  activeSegmentTabText: {
+    color: '#0066CC',
+  },
+  insightsCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    padding: 16,
+    marginBottom: 16,
+  },
+  insightsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 8,
+  },
+  insightRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EFEFEF',
+  },
+  insightLabel: {
+    fontSize: 14,
+    color: '#111',
+  },
+  insightValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0B6BD3',
+  },
+  insightBadge: {
+    fontSize: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
     color: 'white',
+  },
+  badgeWarn: { backgroundColor: '#FF6B35' },
+  badgeOk: { backgroundColor: '#34C759' },
+  insightFootnote: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 8,
   },
   overviewContent: {
     flex: 1,
+    paddingTop: 0,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 12,
+    paddingVertical: 4,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#000000',
+  },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  chevronIcon: {
+    transform: [{ rotate: '0deg' }],
+  },
+  chevronExpanded: {
+    transform: [{ rotate: '180deg' }],
   },
   changeList: {
     marginBottom: 16,
@@ -685,7 +2767,7 @@ const styles = StyleSheet.create({
   changePoints: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#FF6B35',
+    color: '#34C759',
     marginLeft: 4,
   },
   errorMessage: {
@@ -697,22 +2779,11 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#FF4444',
   },
-  errorText: {
-    fontSize: 14,
-    color: '#FF4444',
-    marginLeft: 8,
-    flex: 1,
-  },
   breakdownContent: {
     flex: 1,
+    paddingTop: 0,
   },
   factorsHeader: {
-    marginBottom: 20,
-  },
-  factorsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000000',
     marginBottom: 8,
   },
   factorsSubtitle: {
@@ -722,13 +2793,6 @@ const styles = StyleSheet.create({
   },
   factorsList: {
     flex: 1,
-  },
-  factorItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
   },
   factorIcon: {
     backgroundColor: '#F0F8FF',
@@ -753,15 +2817,11 @@ const styles = StyleSheet.create({
     color: '#0066CC',
   },
   alertsSection: {
-    flex: 1,
     backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    marginTop: -20,
   },
   alertsHeaderList: {
     paddingHorizontal: 16,
-    paddingTop: 20,
+    paddingTop: 16,
     paddingBottom: 8,
   },
   alertInboxTitle: {
@@ -869,16 +2929,12 @@ const styles = StyleSheet.create({
     color: '#666666',
   },
   offersSection: {
-    flex: 1,
     backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    marginTop: -20,
   },
   offersHeader: {
     paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
   },
   offersTitle: {
     fontSize: 24,
@@ -932,16 +2988,701 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   offerButton: {
+    flex: 1,
     backgroundColor: '#0066CC',
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
-    alignSelf: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   offerButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  qualifiedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F9FF',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#D4E6F1',
+  },
+  bannerText: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  bannerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1A202C',
+    marginBottom: 4,
+  },
+  bannerSubtitle: {
+    fontSize: 13,
+    color: '#4A5568',
+    lineHeight: 18,
+  },
+  businessOfferCard: {
+    backgroundColor: 'white',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  cardImage: {
+    width: 100,
+    height: 65,
+    borderRadius: 8,
+    marginRight: 12,
+    resizeMode: 'cover',
+  },
+  businessCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  businessCardBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFB81C',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  businessCardBadgeSecondary: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#0066CC',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  businessCardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000000',
+    marginBottom: 4,
+  },
+  businessCardSubtitle: {
+    fontSize: 14,
+    color: '#666666',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  offerDetails: {
+    marginBottom: 16,
+  },
+  detailRow: {
+    marginBottom: 8,
+  },
+  detailLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  bonusRow: {
+    backgroundColor: '#F0F9FF',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#B3D9FF',
+  },
+  bonusIconContainer: {
+    marginRight: 12,
+  },
+  bonusContent: {
+    flex: 1,
+  },
+  bonusAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0066CC',
+    marginBottom: 2,
+  },
+  bonusCondition: {
+    fontSize: 12,
+    color: '#666666',
+    lineHeight: 16,
+  },
+  benefitsList: {
+    marginBottom: 12,
+  },
+  benefitItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  benefitText: {
+    fontSize: 13,
+    color: '#333333',
+    marginLeft: 8,
+    flex: 1,
+    lineHeight: 18,
+  },
+  lumiqInsight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#0066CC',
+    marginTop: 12,
+    shadowColor: '#0066CC',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  lumiqText: {
+    fontSize: 13,
+    color: '#0066CC',
+    marginLeft: 10,
+    flex: 1,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  detailsButton: {
+    flex: 1,
+    backgroundColor: 'white',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#0066CC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailsButtonText: {
+    color: '#0066CC',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modernCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 15,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    shadowColor: '#4A5568',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.07,
+    shadowRadius: 15,
+    elevation: 4,
+  },
+  modernCardTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1E293B',
+    marginBottom: 16,
+  },
+  cardHeaderWithInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 4,
+  },
+  subSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#334155',
+    marginTop: 12,
+    marginBottom: 10,
+  },
+  utilizationMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  utilizationPercentage: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    marginRight: 12,
+  },
+  utilizationBarContainer: {
+    flex: 1,
+  },
+  usageBar: {
+    height: 12,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 6,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  usageBarFill: {
+    height: '100%',
+    borderRadius: 6,
+  },
+  utilizationRecommendationText: {
+    fontSize: 13,
+    color: '#475569',
+    fontWeight: '500',
+  },
+  utilizationStatsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  utilizationStatItem: {
+    width: '48%',
+    backgroundColor: '#f8fafc',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  utilizationStatItemFull: {
+    width: '100%',
+    backgroundColor: '#f8fafc',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  utilizationStatLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 2,
+  },
+  utilizationStatValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1E293B',
+  },
+  topUtilizationAccounts: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+  },
+  accountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  accountCategoryText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#32325D',
+  },
+  accountBalanceText: {
+    fontSize: 12,
+    color: '#8898AA',
+    marginTop: 2,
+  },
+  accountUtilizationText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  paymentDistributionSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+  },
+  distributionBars: {
+    marginTop: 12,
+  },
+  distributionBarItem: {
+    marginBottom: 12,
+  },
+  distributionBarWrapper: {
+    height: 8,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  distributionBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  distributionBarLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 2,
+  },
+  distributionBarValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1E293B',
+  },
+  industryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  industryInfo: {
+    flex: 1,
+    marginRight: 8,
+  },
+  industryName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#334155',
+  },
+  industryBalance: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  industryOnTimeRate: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  keyFactorsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  keyFactorItem: {
+    width: '48%',
+    backgroundColor: '#f8fafc',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  keyFactorName: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#334155',
+    marginTop: 8,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  keyFactorValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1E293B',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  statusBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  inquiriesSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  inquiryStat: {
+    alignItems: 'center',
+  },
+  inquiryStatLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 4,
+  },
+  inquiryStatValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1E293B',
+  },
+  chartLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#334155',
+    marginBottom: 8,
+  },
+  barChartContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'flex-end',
+    height: 100,
+    marginBottom: 16,
+  },
+  barColumn: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  barWrapper: {
+    width: 20,
+    height: 80,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 4,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  bar: {
+    width: '100%',
+    backgroundColor: '#0066CC',
+    borderRadius: 4,
+  },
+  barLabel: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 4,
+  },
+  obligationsSummary: {
+    marginBottom: 16,
+  },
+  obligationsTotalValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#1E293B',
+    marginBottom: 4,
+  },
+  obligationsSubText: {
+    fontSize: 14,
+    color: '#64748b',
+  },
+  recommendedLimitBox: {
+    backgroundColor: '#f0f9ff',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+  },
+  recommendedLimitLabel: {
+    fontSize: 12,
+    color: '#0369a1',
+    marginBottom: 4,
+  },
+  recommendedLimitValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#0369a1',
+  },
+  obligationAccountItem: {
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  obligationAccountName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  accountStatusTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  accountStatusTagText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  activeTag: {
+    backgroundColor: '#dcfce7',
+  },
+  activeTagText: {
+    color: '#16a34a',
+  },
+  closedTag: {
+    backgroundColor: '#f1f5f9',
+  },
+  closedTagText: {
+    color: '#64748b',
+  },
+  accountDetailsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  progressBarContainer: {
+    flex: 1,
+    height: 8,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 4,
+    marginRight: 12,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  balanceText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#475569',
+  },
+  noDataText: {
+    textAlign: 'center',
+    color: '#64748b',
+    fontStyle: 'italic',
+    paddingVertical: 10,
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  errorContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#FF4444',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: '#0066CC',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // AI Summary Card Styles
+  aiSummaryCard: {
+    backgroundColor: '#F0F9FF',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#B3D9FF',
+  },
+  aiSummaryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  aiSummaryHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  aiSummaryTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0066CC',
+    marginLeft: 8,
+  },
+  scoreBadge: {
+    backgroundColor: '#0066CC',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  scoreText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  // Fit Score Badge
+  fitScoreBadge: {
+    backgroundColor: '#34C759',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  fitScoreText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  // Collapsible Sections
+  collapsibleSection: {
+    backgroundColor: '#F9FAFB',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+  collapsibleHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  collapsibleHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  collapsibleTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333333',
+    marginLeft: 8,
+  },
+  collapsibleText: {
+    fontSize: 13,
+    color: '#333333',
+    lineHeight: 20,
+    marginTop: 8,
+    flexWrap: 'wrap',
+  },
+  moreBenefitsText: {
+    fontSize: 12,
+    color: '#0066CC',
+    fontWeight: '600',
+    marginTop: 4,
+    marginLeft: 22,
+  },
+  // No Recommendations Container
+  noRecommendationsContainer: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noRecommendationsText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#4A5568',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  noRecommendationsSubtext: {
+    fontSize: 14,
+    color: '#8E8E93',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 

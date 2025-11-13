@@ -1,9 +1,35 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { useRouter } from 'expo-router';
 import React from 'react';
-import { ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function MoreScreen() {
+  const { signOut } = useAuth();
+  const router = useRouter();
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await signOut();
+              router.replace('/login');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to sign out');
+            }
+          },
+        },
+      ]
+    );
+  };
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="white" />
@@ -83,6 +109,11 @@ export default function MoreScreen() {
           ['lock.shield', 'Privacy policy'],
           ['info.circle', 'About Chase'],
         ])}
+
+        {/* Logout Button */}
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <Text style={styles.logoutText}>Sign Out</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -146,5 +177,21 @@ const styles = StyleSheet.create({
   cardContent: { padding: 16 },
   featureItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E5E5E5' },
   featureText: { flex: 1, fontSize: 16, fontWeight: '500', color: '#000000', marginLeft: 16 },
+  logoutButton: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  logoutText: {
+    color: '#FF3B30',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
 
