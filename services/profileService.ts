@@ -107,6 +107,13 @@ export async function getRecommendations(
     ? `${API_BASE_URL}/recommendations/${businessId}`
     : `${API_BASE_URL}/recommendations`;
 
+  // Log the request
+  console.log('📤 Sending Recommendations API Request:');
+  console.log('📍 URL:', url);
+  console.log('🔧 Method: GET');
+  console.log('🔑 Authorization:', `Bearer ${token.substring(0, 20)}...`);
+  console.log('📋 Business ID:', businessId || 'Not provided (general recommendations)');
+
   const response = await fetch(url, {
     method: 'GET',
     headers: {
@@ -117,10 +124,34 @@ export async function getRecommendations(
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
+    console.error('❌ Recommendations API Request Failed:', {
+      status: response.status,
+      statusText: response.statusText,
+      url,
+      businessId,
+      error: errorData,
+    });
     throw new Error(errorData.message || 'Failed to fetch recommendations');
   }
 
-  return await response.json();
+  const responseData: RecommendationResponse = await response.json();
+  
+  // Log the response
+  console.log('✅ Recommendations API Response Received:');
+  console.log('📥 Full Response:', JSON.stringify(responseData, null, 2));
+  console.log('📊 Response Summary:', {
+    message: responseData.message,
+    businessId: responseData.businessId,
+    recommendationsCount: responseData.recommendations?.length || 0,
+    score: responseData.score,
+    recommendations: responseData.recommendations?.map((rec: any) => ({
+      cardId: rec.cardId,
+      cardName: rec.cardName,
+      fitScore: rec.fitScore,
+    })),
+  });
+
+  return responseData;
 }
 
 /**
@@ -135,16 +166,17 @@ export async function getCreditProfileAndRecommendations(
   recommendations: RecommendationResponse;
   businessId: string | null;
 }> {
+  console.log('🔄 Starting credit profile and recommendations fetch...');
+  
   // First, fetch user profile to get businessId
   const profile = await getUserProfile(token);
   
   // Extract businessId from profile (use first business if multiple)
   const businessId = profile.data?.business?.[0]?.id || null;
-  
   console.log('📋 Profile fetched - Business ID:', businessId);
-  console.log('Businesses:', profile.data?.business?.map(b => ({ id: b.id, name: b.name })));
 
   // Fetch Experian score and recommendations in parallel
+  console.log('📊 Fetching Experian score and recommendations in parallel...');
   const [experianData, recommendations] = await Promise.all([
     getExperianScore(token),
     businessId ? getRecommendations(token, businessId) : getRecommendations(token),
@@ -152,9 +184,10 @@ export async function getCreditProfileAndRecommendations(
 
   // If we got businessId but general recommendations, try personalized ones
   if (businessId && (!recommendations.recommendations || recommendations.recommendations.length === 0)) {
+    console.log('🔄 No recommendations found, trying personalized recommendations with businessId:', businessId);
     try {
-      console.log('🔄 Fetching personalized recommendations with businessId:', businessId);
       const personalizedRecommendations = await getRecommendations(token, businessId);
+      console.log('✅ Personalized recommendations fetched successfully');
       return {
         profile,
         experianData,
@@ -162,7 +195,7 @@ export async function getCreditProfileAndRecommendations(
         businessId,
       };
     } catch (error) {
-      console.warn('⚠️ Failed to fetch personalized recommendations, using general ones:', error);
+      console.warn('⚠️ Failed to fetch personalized recommendations, using general ones');
       return {
         profile,
         experianData,
@@ -172,6 +205,7 @@ export async function getCreditProfileAndRecommendations(
     }
   }
 
+  console.log('✅ Credit profile and recommendations fetch completed');
   return {
     profile,
     experianData,
@@ -214,6 +248,35 @@ export interface CardApplicationResponse {
   };
 }
 
+/**
+ * Expected API Response Structure:
+ * {
+ *   "message": "Card application recorded",
+ *   "data": {
+ *     "id": "ffe5c44f-b061-4f59-9cb7-86f46b2bb0c2",
+ *     "businessId": "5b1d0990-d47a-4dc3-8e3f-e81a92bb1f3d",
+ *     "cardId": "149e1ee2-d30b-4769-b099-ea2b7b477183",
+ *     "status": "APPLIED",
+ *     "fitScore": 0.95,
+ *     "reason": "...",
+ *     "suggestedUsage": "...",
+ *     "notes": "string",
+ *     "metadata": {},
+ *     "createdAt": "2025-11-13T03:11:41.395Z",
+ *     "updatedAt": "2025-11-13T03:11:41.395Z",
+ *     "card": {
+ *       "id": "149e1ee2-d30b-4769-b099-ea2b7b477183",
+ *       "name": "Ink Business Premier",
+ *       "brand": "Ink",
+ *       "network": null,
+ *       "annualFee": null,
+ *       "createdAt": "2025-11-07T07:50:21.198Z",
+ *       "updatedAt": "2025-11-07T07:50:21.198Z"
+ *     }
+ *   }
+ * }
+ */
+
 export async function trackCardApplication(
   token: string,
   businessId: string,
@@ -223,18 +286,20 @@ export async function trackCardApplication(
 ): Promise<CardApplicationResponse> {
   const url = `${API_BASE_URL}/recommendations/${businessId}/applications`;
 
+  const requestBody = {
+    cardId,
+    status: 'APPLIED',
+    notes: notes || '',
+    metadata: metadata || {},
+  };
+
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({
-      cardId,
-      status: 'APPLIED',
-      notes: notes || '',
-      metadata: metadata || {},
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
@@ -243,14 +308,6 @@ export async function trackCardApplication(
   }
 
   const responseData: CardApplicationResponse = await response.json();
-  console.log('✅ Card application tracked successfully:', {
-    applicationId: responseData.data.id,
-    cardId,
-    cardName: responseData.data.card?.name,
-    businessId,
-    status: responseData.data.status,
-  });
-  
   return responseData;
 }
 

@@ -37,23 +37,15 @@ export function useCreditProfile(): UseCreditProfileReturn {
           throw new Error('No authentication token available. Please log in again.');
         }
 
-        console.log('📊 Fetching profile, Experian score and recommendations...');
         const data = await profileService.getCreditProfileAndRecommendations(tokenToUse);
       
       setProfile(data.profile);
       setExperianData(data.experianData);
       setRecommendations(data.recommendations);
       setBusinessId(data.businessId);
-      
-      console.log('✅ Credit profile data fetched successfully:');
-      console.log('Profile:', data.profile);
-      console.log('Business ID:', data.businessId);
-      console.log('Experian Data:', data.experianData);
-      console.log('Recommendations:', data.recommendations);
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to fetch credit profile';
       setError(errorMessage);
-      console.error('❌ Error fetching credit profile:', err);
     } finally {
       setIsLoading(false);
     }

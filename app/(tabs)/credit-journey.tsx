@@ -3,17 +3,47 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getAllChaseBusinessCards, getCardApplyUrl, getCardDetailsUrl, getCardImageSource, type ChaseBusinessCard } from '@/data/chaseBusinessCards';
 import { useCreditProfile } from '@/hooks/useCreditProfile';
 import {
-  calculateChaseApprovalLikelihood,
-  extractApprovalData,
-  type ChaseCardProfile
+    calculateChaseApprovalLikelihood,
+    extractApprovalData,
+    type ChaseCardProfile
 } from '@/services/chaseApprovalService';
 import { trackCardApplication } from '@/services/profileService';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Linking, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Image, Linking, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Path, Svg } from 'react-native-svg';
+
+// Get screen dimensions for responsive design
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Responsive scaling functions with reduced scaling factor for better UI
+const scale = (size: number): number => {
+  const baseWidth = 375; // iPhone X/11/12/13 standard width
+  const scaleFactor = SCREEN_WIDTH / baseWidth;
+  // Apply 0.8 multiplier to make things smaller
+  return size * Math.min(scaleFactor * 0.8, 1.0); // Cap at 1.0x to prevent excessive scaling
+};
+
+const scaleFont = (size: number): number => {
+  const baseWidth = 375;
+  const scaleFactor = SCREEN_WIDTH / baseWidth;
+  const scaled = size * Math.min(scaleFactor * 0.8, 1.0);
+  // Ensure minimum readable font size
+  return Math.max(scaled, size * 0.8);
+};
+
+const scaleVertical = (size: number): number => {
+  const baseHeight = 812; // iPhone X/11/12/13 standard height
+  const scaleFactor = SCREEN_HEIGHT / baseHeight;
+  // Apply 0.8 multiplier to make things smaller
+  return size * Math.min(scaleFactor * 0.8, 1.0); // Cap at 1.0x to prevent excessive scaling
+};
+
+// Determine if device is small
+const isSmallDevice = SCREEN_WIDTH < 375;
+const isLargeDevice = SCREEN_WIDTH >= 414;
 
 export default function CreditJourneyScreen() {
   const [activeTab, setActiveTab] = useState('credit');
@@ -21,9 +51,31 @@ export default function CreditJourneyScreen() {
   const [activeScoreType, setActiveScoreType] = useState('fsr');
   const [accountType, setAccountType] = useState<'personal' | 'business'>('business');
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['55%', '65%'], []);
-  const alertsSnapPoints = useMemo(() => ['70%', '85%'], []);
-  const offersSnapPoints = useMemo(() => ['55%', '65%'], []);
+  // Responsive snap points based on screen size
+  const snapPoints = useMemo(() => {
+    if (isSmallDevice) {
+      return ['60%', '75%'];
+    } else if (isLargeDevice) {
+      return ['50%', '60%'];
+    }
+    return ['55%', '65%'];
+  }, []);
+  const alertsSnapPoints = useMemo(() => {
+    if (isSmallDevice) {
+      return ['75%', '90%'];
+    } else if (isLargeDevice) {
+      return ['65%', '80%'];
+    }
+    return ['70%', '85%'];
+  }, []);
+  const offersSnapPoints = useMemo(() => {
+    if (isSmallDevice) {
+      return ['60%', '75%'];
+    } else if (isLargeDevice) {
+      return ['50%', '60%'];
+    }
+    return ['55%', '65%'];
+  }, []);
   
   // Fetch credit profile and recommendations from API
   const { profile, experianData, recommendations, businessId, isLoading, error, refresh } = useCreditProfile();
@@ -101,7 +153,6 @@ export default function CreditJourneyScreen() {
       await AsyncStorage.setItem(storageKey, newCount.toString());
       return newCount;
     } catch (error) {
-      console.error('❌ Failed to track application count:', error);
       return 1; // Return 1 as fallback if storage fails
     }
   };
@@ -126,31 +177,14 @@ export default function CreditJourneyScreen() {
           // Call API to track application: POST /recommendations/{businessId}/applications
           // Status is always "APPLIED" for recommendations
           // Include application count in metadata
-          const applicationResponse = await trackCardApplication(token, businessId, cardId, '', {
+          await trackCardApplication(token, businessId, cardId, '', {
             applicationCount,
             timestamp: new Date().toISOString(),
           });
-          
-          // Log the full response data
-          console.log('✅ Application recorded successfully:', {
-            applicationId: applicationResponse.data.id,
-            cardName: applicationResponse.data.card?.name || 'Unknown Card',
-            status: applicationResponse.data.status,
-            fitScore: applicationResponse.data.fitScore,
-            totalApplications: applicationCount,
-            message: applicationResponse.message,
-          });
-        } else {
-          console.warn('⚠️ No token available, skipping application tracking');
         }
       } catch (error) {
-        console.error('❌ Failed to track application:', error);
         // Continue to open URL even if tracking fails
       }
-    } else if (cardId && !isUUID) {
-      console.log('ℹ️ Skipping tracking for static card (backend only accepts API recommendation UUIDs):', cardId);
-    } else if (cardId && !businessId) {
-      console.warn('⚠️ No businessId available, skipping application tracking for card:', cardId);
     }
     
     // Open the application URL
@@ -158,8 +192,6 @@ export default function CreditJourneyScreen() {
     
     if (supported) {
       await Linking.openURL(url);
-    } else {
-      console.error(`Don't know how to open URI: ${url}`);
     }
   };
 
@@ -252,13 +284,6 @@ export default function CreditJourneyScreen() {
     // Try to get personal credit score from experianData
     const personalScore = experianData?.creditScore || experianData?.score || null;
     
-    console.log('🔍 Personal Score Data Check:', {
-      personalScore,
-      experianDataCreditScore: experianData?.creditScore,
-      experianDataScore: experianData?.score,
-      accountType
-    });
-    
     // If we have a score in the 300-850 range, use it
     if (personalScore && personalScore >= 300 && personalScore <= 850) {
       return {
@@ -279,7 +304,6 @@ export default function CreditJourneyScreen() {
       changeDirection: 'up' as 'up' | 'down',
     };
     
-    console.log('✅ Using fallback personal score:', fallbackData);
     return fallbackData;
   }, [experianData, accountType]);
 
@@ -745,7 +769,6 @@ export default function CreditJourneyScreen() {
               accountType === 'personal' && styles.segmentButtonActive
             ]}
             onPress={() => {
-              console.log('👤 Personal tab clicked');
               setAccountType('personal');
             }}
           >
@@ -1454,7 +1477,7 @@ export default function CreditJourneyScreen() {
               </View>
             )}
               </View>
-              <View style={{ height: 140 }} />
+              <View style={{ height: scale(140) }} />
               </BottomSheetScrollView>
           </BottomSheet>
         </View>
@@ -1884,10 +1907,8 @@ export default function CreditJourneyScreen() {
                       // Preserve API cardName
                       cardName: rec.cardName || matchedCard.cardName,
                     };
-                    console.log(`✅ Enriched recommendation: ${rec.cardName} with static card data`);
                     return enriched;
                   }
-                  console.log(`ℹ️ No static card match found for: ${rec.cardName}`);
                   return rec;
                 });
                 
@@ -2177,21 +2198,27 @@ export default function CreditJourneyScreen() {
 
                     <View style={styles.buttonRow}>
                       <TouchableOpacity 
-                        style={styles.offerButton} 
+                        style={[
+                          styles.offerButton,
+                          (rec.hasApplied || rec.applicationStatus === 'APPLIED') && styles.offerButtonDisabled
+                        ]}
+                        disabled={rec.hasApplied || rec.applicationStatus === 'APPLIED'}
                         onPress={() => {
                           // Use cardId (preferred) or fallback to id
                           // API recommendations have cardId (UUID), static cards have cardId (string)
                           const cardId = rec.cardId || rec.id;
                           const cardName = rec.cardName || rec.name;
-                          if (!cardId) {
-                            console.warn('⚠️ No cardId or id found for card:', cardName);
-                          }
                           // Get card-specific application URL
                           const applyUrl = rec.applyUrl || getCardApplyUrl(cardId, cardName) || undefined;
                           handleApplyNow(cardId, applyUrl);
                         }}
                       >
-                        <Text style={styles.offerButtonText}>Apply Now</Text>
+                        <Text style={[
+                          styles.offerButtonText,
+                          (rec.hasApplied || rec.applicationStatus === 'APPLIED') && styles.offerButtonTextDisabled
+                        ]}>
+                          {(rec.hasApplied || rec.applicationStatus === 'APPLIED') ? 'Already Applied' : 'Apply Now'}
+                        </Text>
                       </TouchableOpacity>
                       <TouchableOpacity 
                         style={styles.detailsButton}
@@ -2201,11 +2228,7 @@ export default function CreditJourneyScreen() {
                             const supported = await Linking.canOpenURL(detailsUrl);
                             if (supported) {
                               await Linking.openURL(detailsUrl);
-                            } else {
-                              console.error(`Don't know how to open URI: ${detailsUrl}`);
                             }
-                          } else {
-                            console.warn('⚠️ No details URL found for card:', rec.cardName || rec.name);
                           }
                         }}
                       >
@@ -2247,29 +2270,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: scale(16),
+    paddingVertical: scaleVertical(12),
     position: 'relative',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   accountTypeContainer: {
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingHorizontal: scale(16),
+    paddingBottom: scaleVertical(12),
   },
   segmentControl: {
     flexDirection: 'row',
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    borderRadius: 8,
-    padding: 4,
+    borderRadius: scale(8),
+    padding: scale(4),
     width: '100%',
-    maxWidth: 300,
+    maxWidth: scale(300),
   },
   segmentButton: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 6,
+    paddingVertical: scaleVertical(8),
+    paddingHorizontal: scale(16),
+    borderRadius: scale(6),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2277,7 +2300,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
   },
   segmentButtonText: {
-    fontSize: 15,
+    fontSize: scaleFont(15),
     fontWeight: '600',
     color: 'rgba(255, 255, 255, 0.7)',
   },
@@ -2285,10 +2308,10 @@ const styles = StyleSheet.create({
     color: '#1A237E',
   },
   backButton: {
-    padding: 8,
+    padding: scale(8),
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: 'bold',
     color: 'white',
   },
@@ -2298,39 +2321,39 @@ const styles = StyleSheet.create({
   },
   notificationButton: {
     position: 'absolute',
-    left: 60,
-    padding: 8,
+    left: scale(60),
+    padding: scale(8),
   },
   notificationBadge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
+    top: scale(4),
+    right: scale(4),
     backgroundColor: '#0066CC',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
+    borderRadius: scale(10),
+    width: scale(20),
+    height: scale(20),
     alignItems: 'center',
     justifyContent: 'center',
   },
   notificationCount: {
     color: 'white',
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: 'bold',
   },
   moreButton: {
-    padding: 8,
+    padding: scale(8),
   },
   tabContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+    paddingHorizontal: scale(16),
+    paddingBottom: scaleVertical(16),
     alignItems: 'center',
   },
   tab: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginRight: 8,
-    borderRadius: 20,
+    paddingHorizontal: scale(16),
+    paddingVertical: scaleVertical(8),
+    marginRight: scale(8),
+    borderRadius: scale(20),
     position: 'relative',
   },
   activeTab: {
@@ -2340,7 +2363,7 @@ const styles = StyleSheet.create({
   },
   tabText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '500',
   },
   activeTabText: {
@@ -2350,50 +2373,50 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    paddingHorizontal: scale(16),
+    marginBottom: scaleVertical(12),
   },
   quickLabel: {
     color: '#666666',
-    fontSize: 14,
+    fontSize: scaleFont(14),
     opacity: 0.9,
   },
   quickPill: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'white',
-    borderRadius: 18,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderRadius: scale(18),
+    paddingHorizontal: scale(12),
+    paddingVertical: scaleVertical(6),
   },
   quickPillText: {
     color: '#0066CC',
-    fontSize: 14,
-    marginLeft: 6,
+    fontSize: scaleFont(14),
+    marginLeft: scale(6),
     fontWeight: '600',
   },
   quickBadge: {
-    marginLeft: 8,
+    marginLeft: scale(8),
     backgroundColor: '#0066CC',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
+    borderRadius: scale(10),
+    width: scale(20),
+    height: scale(20),
     alignItems: 'center',
     justifyContent: 'center',
   },
   quickBadgeText: {
     color: 'white',
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '700',
   },
   alertBadge: {
     position: 'absolute',
-    top: -6,
-    right: 2,
+    top: scale(-6),
+    right: scale(2),
     backgroundColor: '#0066CC',
-    borderRadius: 8,
-    width: 16,
-    height: 16,
+    borderRadius: scale(8),
+    width: scale(16),
+    height: scale(16),
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
@@ -2401,70 +2424,70 @@ const styles = StyleSheet.create({
   },
   alertCount: {
     color: 'white',
-    fontSize: 10,
+    fontSize: scaleFont(10),
     fontWeight: '700',
-    lineHeight: 10,
+    lineHeight: scaleFont(10),
   },
   creditContent: {
     flex: 1,
   },
   scoreSection: {
-    paddingHorizontal: 16,
-    paddingBottom: 48,
+    paddingHorizontal: scale(16),
+    paddingBottom: scaleVertical(48),
   },
   scoreHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   scoreHeaderLeft: {
     flex: 1,
   },
   businessName: {
     color: 'white',
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
   },
   scoreDate: {
     color: 'white',
-    fontSize: 14,
+    fontSize: scaleFont(14),
   },
   scoreHistory: {
     color: '#66B3FF',
-    fontSize: 14,
+    fontSize: scaleFont(14),
   },
   gaugeContainer: {
     alignItems: 'center',
-    marginTop: -60,
-    marginBottom: 16,
-    paddingVertical: 10,
+    marginTop: scaleVertical(-60),
+    marginBottom: scaleVertical(16),
+    paddingVertical: scaleVertical(10),
   },
   metersContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 10,
-    marginBottom: 8,
+    paddingHorizontal: scale(10),
+    marginBottom: scaleVertical(8),
   },
   meterWrapper: {
     flex: 1,
     alignItems: 'center',
-    paddingHorizontal: 5,
+    paddingHorizontal: scale(5),
   },
   scoreTypeTabsContainer: {
     flexDirection: 'row',
     position: 'relative',
     zIndex: 0,
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 8,
-    marginTop: 10,
+    paddingHorizontal: scale(16),
+    marginBottom: scaleVertical(8),
+    marginTop: scaleVertical(10),
   },
   scoreTypeTab: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    marginHorizontal: 8,
-    borderRadius: 20,
+    paddingHorizontal: scale(24),
+    paddingVertical: scaleVertical(10),
+    marginHorizontal: scale(8),
+    borderRadius: scale(20),
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   activeScoreTypeTab: {
@@ -2474,7 +2497,7 @@ const styles = StyleSheet.create({
   },
   scoreTypeTabText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '500',
   },
   activeScoreTypeTabText: {
@@ -2483,19 +2506,19 @@ const styles = StyleSheet.create({
   },
   scoreInfo: {
     alignItems: 'center',
-    marginTop: -112,
+    marginTop: scaleVertical(-112),
   },
   scoreCategory: {
     color: 'white',
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: '500',
-    marginBottom: 2,
+    marginBottom: scaleVertical(2),
   },
   scoreValue: {
     color: 'white',
-    fontSize: 40,
+    fontSize: scaleFont(40),
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   scoreChange: {
     flexDirection: 'row',
@@ -2503,21 +2526,21 @@ const styles = StyleSheet.create({
   },
   scoreChangeText: {
     color: '#34C759',
-    fontSize: 18,
-    marginLeft: 4,
+    fontSize: scaleFont(18),
+    marginLeft: scale(4),
     fontWeight: '600',
   },
   noChangeText: {
     color: '#999999',
-    fontSize: 16,
-    marginTop: 4,
+    fontSize: scaleFont(16),
+    marginTop: scaleVertical(4),
     fontWeight: '500',
   },
   approvalScoreCard: {
     backgroundColor: '#F0F9FF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: scale(12),
+    padding: scale(16),
+    marginBottom: scaleVertical(12),
     borderWidth: 1,
     borderColor: '#B3D9FF',
   },
@@ -2525,66 +2548,66 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   approvalScoreHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   approvalScoreTitle: {
-    fontSize: 15,
+    fontSize: scaleFont(15),
     fontWeight: '700',
     color: '#0066CC',
-    marginLeft: 8,
+    marginLeft: scale(8),
   },
   approvalScoreBadge: {
     backgroundColor: '#0066CC',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    minWidth: 70,
+    paddingHorizontal: scale(12),
+    paddingVertical: scaleVertical(6),
+    borderRadius: scale(16),
+    minWidth: scale(70),
     alignItems: 'center',
   },
   approvalScoreValue: {
     color: 'white',
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '700',
   },
   approvalRecommendation: {
-    marginTop: 4,
+    marginTop: scaleVertical(4),
   },
   approvalRecommendationText: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '600',
     color: '#0066CC',
   },
   expectedLimitText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     color: '#666666',
-    marginTop: 8,
+    marginTop: scaleVertical(8),
     fontWeight: '500',
   },
   factorsContainer: {
     backgroundColor: '#F9FAFB',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
+    borderRadius: scale(8),
+    padding: scale(12),
+    marginBottom: scaleVertical(12),
   },
   factorsTitle: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
     color: '#333333',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   factorItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: scaleVertical(6),
   },
   factorText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     color: '#333333',
-    marginLeft: 8,
+    marginLeft: scale(8),
     flex: 1,
   },
   topRecommendationBadge: {
@@ -2593,69 +2616,69 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF9E6',
     borderWidth: 1,
     borderColor: '#FFD700',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginBottom: 12,
+    borderRadius: scale(8),
+    paddingHorizontal: scale(12),
+    paddingVertical: scaleVertical(6),
+    marginBottom: scaleVertical(12),
     alignSelf: 'flex-start',
   },
   topRecommendationText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     fontWeight: '700',
     color: '#B8860B',
-    marginLeft: 6,
+    marginLeft: scale(6),
   },
   scoreFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 10,
-    marginBottom: 64,
+    marginTop: scaleVertical(10),
+    marginBottom: scaleVertical(64),
   },
   scoreProvider: {
     color: 'white',
-    fontSize: 14,
-    marginRight: 8,
+    fontSize: scaleFont(14),
+    marginRight: scale(8),
   },
   sheetBg: {
     backgroundColor: 'white',
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
+    borderTopLeftRadius: scale(22),
+    borderTopRightRadius: scale(22),
   },
   sheetHandle: {
     backgroundColor: '#E5E5E5',
   },
   sheetContent: {
-    paddingHorizontal: 0,
-    paddingBottom: 200,
+    paddingHorizontal: scale(0),
+    paddingBottom: scaleVertical(200),
   },
   breakdownCard: {
     backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 12,
-    paddingHorizontal: 16,
-    paddingBottom: 20,
-    marginTop: 0,
+    borderTopLeftRadius: scale(20),
+    borderTopRightRadius: scale(20),
+    paddingTop: scaleVertical(12),
+    paddingHorizontal: scale(16),
+    paddingBottom: scaleVertical(20),
+    marginTop: scaleVertical(0),
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -1 },
+    shadowOffset: { width: scale(0), height: -1 },
     shadowOpacity: 0.06,
-    shadowRadius: 8,
+    shadowRadius: scale(8),
   },
   breakdownTabsContainer: {
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   segmentedTabs: {
     flexDirection: 'row',
     backgroundColor: '#F2F4F7',
-    borderRadius: 24,
-    padding: 4,
+    borderRadius: scale(24),
+    padding: scale(4),
   },
   segmentTab: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: scale(18),
+    paddingVertical: scaleVertical(8),
+    borderRadius: scale(20),
   },
   activeSegmentTab: {
     backgroundColor: 'white',
@@ -2663,7 +2686,7 @@ const styles = StyleSheet.create({
     borderColor: '#0066CC',
   },
   segmentTabText: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
     color: '#666666',
   },
@@ -2672,49 +2695,49 @@ const styles = StyleSheet.create({
   },
   insightsCard: {
     backgroundColor: 'white',
-    borderRadius: 12,
+    borderRadius: scale(12),
     borderWidth: 1,
     borderColor: '#E5E5E5',
-    padding: 16,
-    marginBottom: 16,
+    padding: scale(16),
+    marginBottom: scaleVertical(16),
   },
   insightsTitle: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '700',
     color: '#000',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   insightRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: scaleVertical(10),
     borderBottomWidth: 1,
     borderBottomColor: '#EFEFEF',
   },
   insightLabel: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     color: '#111',
   },
   insightValue: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
     color: '#0B6BD3',
   },
   insightBadge: {
-    fontSize: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    fontSize: scaleFont(12),
+    paddingHorizontal: scale(8),
+    paddingVertical: scaleVertical(4),
+    borderRadius: scale(12),
     overflow: 'hidden',
     color: 'white',
   },
   badgeWarn: { backgroundColor: '#FF6B35' },
   badgeOk: { backgroundColor: '#34C759' },
   insightFootnote: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     color: '#6B7280',
-    marginTop: 8,
+    marginTop: scaleVertical(8),
   },
   overviewContent: {
     flex: 1,
@@ -2724,18 +2747,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
-    paddingVertical: 4,
+    marginBottom: scaleVertical(12),
+    paddingVertical: scaleVertical(4),
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: 'bold',
     color: '#000000',
   },
   headerRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: scale(12),
   },
   chevronIcon: {
     transform: [{ rotate: '0deg' }],
@@ -2744,39 +2767,39 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '180deg' }],
   },
   changeList: {
-    marginBottom: 16,
+    marginBottom: scaleVertical(16),
   },
   changeItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: scaleVertical(12),
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E5',
   },
   changeDescription: {
     flex: 1,
-    fontSize: 16,
+    fontSize: scaleFont(16),
     color: '#333333',
-    marginRight: 16,
+    marginRight: scale(16),
   },
   changeImpact: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   changePoints: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
     color: '#34C759',
-    marginLeft: 4,
+    marginLeft: scale(4),
   },
   errorMessage: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFF5F5',
-    padding: 12,
-    borderRadius: 8,
-    borderLeftWidth: 4,
+    padding: scale(12),
+    borderRadius: scale(8),
+    borderLeftWidth: scale(4),
     borderLeftColor: '#FF4444',
   },
   breakdownContent: {
@@ -2784,12 +2807,12 @@ const styles = StyleSheet.create({
     paddingTop: 0,
   },
   factorsHeader: {
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   factorsSubtitle: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     color: '#666666',
-    lineHeight: 20,
+    lineHeight: scaleFont(20),
   },
   factorsList: {
     flex: 1,
@@ -2798,103 +2821,103 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F8FF',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
+    width: scale(40),
+    height: scale(40),
+    borderRadius: scale(20),
+    marginRight: scale(12),
   },
   factorContent: {
     flex: 1,
   },
   factorName: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '500',
     color: '#000000',
-    marginBottom: 4,
+    marginBottom: scaleVertical(4),
   },
   factorImpact: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     color: '#0066CC',
   },
   alertsSection: {
     backgroundColor: 'white',
   },
   alertsHeaderList: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
+    paddingHorizontal: scale(16),
+    paddingTop: scaleVertical(16),
+    paddingBottom: scaleVertical(8),
   },
   alertInboxTitle: {
-    fontSize: 28,
+    fontSize: scaleFont(28),
     fontWeight: '800',
     color: '#000000',
   },
   alertList: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
+    paddingHorizontal: scale(16),
+    paddingBottom: scaleVertical(24),
   },
   alertRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: scaleVertical(14),
   },
   rowDivider: {
-    height: 1,
+    height: scale(1),
     backgroundColor: '#EDEDED',
   },
   alertIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: scale(40),
+    height: scale(40),
+    borderRadius: scale(20),
     backgroundColor: '#F2F7FF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: scale(12),
   },
   alertRowLeft: {
     flex: 1,
   },
   alertRowTitle: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: '600',
     color: '#111111',
   },
   alertRowSubtitle: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     color: '#8A8A8E',
-    marginTop: 2,
+    marginTop: scaleVertical(2),
     textTransform: 'uppercase',
     letterSpacing: 0.2,
   },
   alertRowDate: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     color: '#8A8A8E',
-    marginLeft: 8,
+    marginLeft: scale(8),
   },
   unreadPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: scale(10),
+    paddingVertical: scaleVertical(4),
     backgroundColor: '#E8F1FF',
-    borderRadius: 14,
-    marginRight: 8,
+    borderRadius: scale(14),
+    marginRight: scale(8),
   },
   unreadText: {
     color: '#0B6BD3',
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '700',
   },
   alertCard: {
     backgroundColor: 'white',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 12,
+    marginHorizontal: scale(16),
+    marginBottom: scaleVertical(16),
+    padding: scale(16),
+    borderRadius: scale(12),
     borderWidth: 1,
     borderColor: '#E5E5E5',
     shadowColor: '#000',
     shadowOffset: {
-      width: 0,
-      height: 2,
+      width: scale(0),
+      height: scale(2),
     },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -2903,61 +2926,61 @@ const styles = StyleSheet.create({
   alertHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   alertType: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '600',
     color: '#666666',
-    marginLeft: 8,
+    marginLeft: scale(8),
     textTransform: 'uppercase',
   },
   alertTitle: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: 'bold',
     color: '#000000',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   alertDescription: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     color: '#333333',
-    lineHeight: 20,
-    marginBottom: 8,
+    lineHeight: scaleFont(20),
+    marginBottom: scaleVertical(8),
   },
   alertDate: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     color: '#666666',
   },
   offersSection: {
     backgroundColor: 'white',
   },
   offersHeader: {
-    paddingHorizontal: 16,
+    paddingHorizontal: scale(16),
     paddingTop: 16,
     paddingBottom: 12,
   },
   offersTitle: {
-    fontSize: 24,
+    fontSize: scaleFont(24),
     fontWeight: 'bold',
     color: '#000000',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   offersSubtitle: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     color: '#666666',
   },
   offerCard: {
     backgroundColor: 'white',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 12,
+    marginHorizontal: scale(16),
+    marginBottom: scaleVertical(16),
+    padding: scale(16),
+    borderRadius: scale(12),
     borderWidth: 1,
     borderColor: '#E5E5E5',
     shadowColor: '#000',
     shadowOffset: {
-      width: 0,
-      height: 2,
+      width: scale(0),
+      height: scale(2),
     },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -2966,209 +2989,216 @@ const styles = StyleSheet.create({
   offerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   offerType: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     fontWeight: '600',
     color: '#666666',
-    marginLeft: 8,
+    marginLeft: scale(8),
     textTransform: 'uppercase',
   },
   offerTitle: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: 'bold',
     color: '#000000',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   offerDescription: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     color: '#333333',
-    lineHeight: 20,
-    marginBottom: 16,
+    lineHeight: scaleFont(20),
+    marginBottom: scaleVertical(16),
   },
   offerButton: {
     flex: 1,
     backgroundColor: '#0066CC',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
+    paddingVertical: scaleVertical(12),
+    paddingHorizontal: scale(24),
+    borderRadius: scale(8),
     alignItems: 'center',
     justifyContent: 'center',
   },
+  offerButtonDisabled: {
+    backgroundColor: '#CCCCCC',
+    opacity: 0.6,
+  },
   offerButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '600',
+  },
+  offerButtonTextDisabled: {
+    color: '#666666',
   },
   qualifiedBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F0F9FF',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 12,
+    marginHorizontal: scale(16),
+    marginBottom: scaleVertical(16),
+    padding: scale(16),
+    borderRadius: scale(12),
     borderWidth: 1,
     borderColor: '#D4E6F1',
   },
   bannerText: {
-    marginLeft: 12,
+    marginLeft: scale(12),
     flex: 1,
   },
   bannerTitle: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '700',
     color: '#1A202C',
-    marginBottom: 4,
+    marginBottom: scaleVertical(4),
   },
   bannerSubtitle: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     color: '#4A5568',
-    lineHeight: 18,
+    lineHeight: scaleFont(18),
   },
   businessOfferCard: {
     backgroundColor: 'white',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 12,
+    marginHorizontal: scale(16),
+    marginBottom: scaleVertical(16),
+    padding: scale(16),
+    borderRadius: scale(12),
     borderWidth: 1,
     borderColor: '#E5E5E5',
     shadowColor: '#000',
     shadowOffset: {
-      width: 0,
-      height: 2,
+      width: scale(0),
+      height: scale(2),
     },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowRadius: scale(4),
     elevation: 2,
   },
   cardImage: {
-    width: 100,
-    height: 65,
-    borderRadius: 8,
-    marginRight: 12,
+    width: scale(100),
+    height: scale(65),
+    borderRadius: scale(8),
+    marginRight: scale(12),
     resizeMode: 'cover',
   },
   businessCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: scaleVertical(12),
   },
   businessCardBadge: {
-    fontSize: 10,
+    fontSize: scaleFont(10),
     fontWeight: '800',
     color: '#FFB81C',
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   businessCardBadgeSecondary: {
-    fontSize: 10,
+    fontSize: scaleFont(10),
     fontWeight: '800',
     color: '#0066CC',
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   businessCardTitle: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: '700',
     color: '#000000',
-    marginBottom: 4,
+    marginBottom: scaleVertical(4),
   },
   businessCardSubtitle: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     color: '#666666',
-    marginBottom: 16,
-    lineHeight: 20,
+    marginBottom: scaleVertical(16),
+    lineHeight: scaleFont(20),
   },
   offerDetails: {
-    marginBottom: 16,
+    marginBottom: scaleVertical(16),
   },
   detailRow: {
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   detailLabel: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     fontWeight: '600',
     color: '#333333',
   },
   bonusRow: {
     backgroundColor: '#F0F9FF',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 12,
+    padding: scale(12),
+    borderRadius: scale(8),
+    marginBottom: scaleVertical(12),
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#B3D9FF',
   },
   bonusIconContainer: {
-    marginRight: 12,
+    marginRight: scale(12),
   },
   bonusContent: {
     flex: 1,
   },
   bonusAmount: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '700',
     color: '#0066CC',
-    marginBottom: 2,
+    marginBottom: scaleVertical(2),
   },
   bonusCondition: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     color: '#666666',
-    lineHeight: 16,
+    lineHeight: scaleFont(16),
   },
   benefitsList: {
-    marginBottom: 12,
+    marginBottom: scaleVertical(12),
   },
   benefitItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: scaleVertical(8),
   },
   benefitText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     color: '#333333',
-    marginLeft: 8,
+    marginLeft: scale(8),
     flex: 1,
-    lineHeight: 18,
+    lineHeight: scaleFont(18),
   },
   lumiqInsight: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    padding: 12,
-    borderRadius: 12,
+    padding: scale(12),
+    borderRadius: scale(12),
     borderWidth: 1.5,
     borderColor: '#0066CC',
-    marginTop: 12,
+    marginTop: scaleVertical(12),
     shadowColor: '#0066CC',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: scale(0), height: scale(1) },
     shadowOpacity: 0.08,
     shadowRadius: 3,
     elevation: 2,
   },
   lumiqText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     color: '#0066CC',
-    marginLeft: 10,
+    marginLeft: scale(10),
     flex: 1,
     fontWeight: '600',
-    lineHeight: 18,
+    lineHeight: scaleFont(18),
   },
   buttonRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: scale(12),
   },
   detailsButton: {
     flex: 1,
     backgroundColor: 'white',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
+    paddingVertical: scaleVertical(12),
+    paddingHorizontal: scale(24),
+    borderRadius: scale(8),
     borderWidth: 1,
     borderColor: '#0066CC',
     alignItems: 'center',
@@ -3176,69 +3206,69 @@ const styles = StyleSheet.create({
   },
   detailsButtonText: {
     color: '#0066CC',
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '600',
   },
   modernCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 15,
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 18,
+    borderRadius: scale(15),
+    marginHorizontal: scale(16),
+    marginTop: scaleVertical(12),
+    marginBottom: scaleVertical(12),
+    paddingHorizontal: scale(18),
+    paddingVertical: scaleVertical(18),
     shadowColor: '#4A5568',
-    shadowOffset: { width: 0, height: 6 },
+    shadowOffset: { width: scale(0), height: scale(6) },
     shadowOpacity: 0.07,
-    shadowRadius: 15,
+    shadowRadius: scale(15),
     elevation: 4,
   },
   modernCardTitle: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: '600',
     color: '#1E293B',
-    marginBottom: 16,
+    marginBottom: scaleVertical(16),
   },
   cardHeaderWithInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
-    paddingVertical: 4,
+    marginBottom: scaleVertical(16),
+    paddingVertical: scaleVertical(4),
   },
   subSectionTitle: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '600',
     color: '#334155',
-    marginTop: 12,
-    marginBottom: 10,
+    marginTop: scaleVertical(12),
+    marginBottom: scaleVertical(10),
   },
   utilizationMainRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: scaleVertical(16),
   },
   utilizationPercentage: {
-    fontSize: 36,
+    fontSize: scaleFont(36),
     fontWeight: 'bold',
-    marginRight: 12,
+    marginRight: scale(12),
   },
   utilizationBarContainer: {
     flex: 1,
   },
   usageBar: {
-    height: 12,
+    height: scale(12),
     backgroundColor: '#e2e8f0',
-    borderRadius: 6,
+    borderRadius: scale(6),
     overflow: 'hidden',
-    marginBottom: 4,
+    marginBottom: scaleVertical(4),
   },
   usageBarFill: {
     height: '100%',
-    borderRadius: 6,
+    borderRadius: scale(6),
   },
   utilizationRecommendationText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     color: '#475569',
     fontWeight: '500',
   },
@@ -3246,34 +3276,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: scaleVertical(10),
   },
   utilizationStatItem: {
     width: '48%',
     backgroundColor: '#f8fafc',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 8,
+    padding: scale(10),
+    borderRadius: scale(8),
+    marginBottom: scaleVertical(8),
   },
   utilizationStatItemFull: {
     width: '100%',
     backgroundColor: '#f8fafc',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 8,
+    padding: scale(10),
+    borderRadius: scale(8),
+    marginBottom: scaleVertical(8),
   },
   utilizationStatLabel: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     color: '#64748b',
-    marginBottom: 2,
+    marginBottom: scaleVertical(2),
   },
   utilizationStatValue: {
-    fontSize: 15,
+    fontSize: scaleFont(15),
     fontWeight: '600',
     color: '#1E293B',
   },
   topUtilizationAccounts: {
-    marginTop: 8,
+    marginTop: scaleVertical(8),
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
@@ -3282,224 +3312,224 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: scaleVertical(8),
     borderBottomWidth: 1,
     borderBottomColor: '#f1f5f9',
   },
   accountCategoryText: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '500',
     color: '#32325D',
   },
   accountBalanceText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     color: '#8898AA',
-    marginTop: 2,
+    marginTop: scaleVertical(2),
   },
   accountUtilizationText: {
-    fontSize: 15,
+    fontSize: scaleFont(15),
     fontWeight: '600',
   },
   paymentDistributionSection: {
-    marginTop: 16,
+    marginTop: scaleVertical(16),
     paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
   },
   distributionBars: {
-    marginTop: 12,
+    marginTop: scaleVertical(12),
   },
   distributionBarItem: {
-    marginBottom: 12,
+    marginBottom: scaleVertical(12),
   },
   distributionBarWrapper: {
-    height: 8,
+    height: scale(8),
     backgroundColor: '#e2e8f0',
-    borderRadius: 4,
+    borderRadius: scale(4),
     overflow: 'hidden',
-    marginBottom: 4,
+    marginBottom: scaleVertical(4),
   },
   distributionBarFill: {
     height: '100%',
-    borderRadius: 4,
+    borderRadius: scale(4),
   },
   distributionBarLabel: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     color: '#64748b',
-    marginBottom: 2,
+    marginBottom: scaleVertical(2),
   },
   distributionBarValue: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
     color: '#1E293B',
   },
   industryItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: scaleVertical(12),
     borderBottomWidth: 1,
     borderBottomColor: '#f1f5f9',
   },
   industryInfo: {
     flex: 1,
-    marginRight: 8,
+    marginRight: scale(8),
   },
   industryName: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '500',
     color: '#334155',
   },
   industryBalance: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     color: '#64748b',
-    marginTop: 2,
+    marginTop: scaleVertical(2),
   },
   industryOnTimeRate: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
   },
   keyFactorsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: scaleVertical(16),
   },
   keyFactorItem: {
     width: '48%',
     backgroundColor: '#f8fafc',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 12,
+    padding: scale(12),
+    borderRadius: scale(8),
+    marginBottom: scaleVertical(12),
     alignItems: 'center',
   },
   keyFactorName: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     fontWeight: '500',
     color: '#334155',
-    marginTop: 8,
-    marginBottom: 4,
+    marginTop: scaleVertical(8),
+    marginBottom: scaleVertical(4),
     textAlign: 'center',
   },
   keyFactorValue: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
     color: '#1E293B',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
     textAlign: 'center',
   },
   statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: scale(8),
+    paddingVertical: scaleVertical(4),
+    borderRadius: scale(12),
     overflow: 'hidden',
   },
   statusBadgeText: {
     color: 'white',
-    fontSize: 10,
+    fontSize: scaleFont(10),
     fontWeight: '600',
   },
   inquiriesSummaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: scaleVertical(16),
   },
   inquiryStat: {
     alignItems: 'center',
   },
   inquiryStatLabel: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     color: '#64748b',
-    marginBottom: 4,
+    marginBottom: scaleVertical(4),
   },
   inquiryStatValue: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '600',
     color: '#1E293B',
   },
   chartLabel: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '500',
     color: '#334155',
-    marginBottom: 8,
+    marginBottom: scaleVertical(8),
   },
   barChartContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'flex-end',
-    height: 100,
-    marginBottom: 16,
+    height: scale(100),
+    marginBottom: scaleVertical(16),
   },
   barColumn: {
     flex: 1,
     alignItems: 'center',
   },
   barWrapper: {
-    width: 20,
-    height: 80,
+    width: scale(20),
+    height: scale(80),
     backgroundColor: '#e2e8f0',
-    borderRadius: 4,
+    borderRadius: scale(4),
     justifyContent: 'flex-end',
     overflow: 'hidden',
   },
   bar: {
     width: '100%',
     backgroundColor: '#0066CC',
-    borderRadius: 4,
+    borderRadius: scale(4),
   },
   barLabel: {
-    fontSize: 11,
+    fontSize: scaleFont(11),
     color: '#64748b',
-    marginTop: 4,
+    marginTop: scaleVertical(4),
   },
   obligationsSummary: {
-    marginBottom: 16,
+    marginBottom: scaleVertical(16),
   },
   obligationsTotalValue: {
-    fontSize: 28,
+    fontSize: scaleFont(28),
     fontWeight: 'bold',
     color: '#1E293B',
-    marginBottom: 4,
+    marginBottom: scaleVertical(4),
   },
   obligationsSubText: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     color: '#64748b',
   },
   recommendedLimitBox: {
     backgroundColor: '#f0f9ff',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
+    padding: scale(12),
+    borderRadius: scale(8),
+    marginBottom: scaleVertical(16),
     borderWidth: 1,
     borderColor: '#bae6fd',
   },
   recommendedLimitLabel: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     color: '#0369a1',
-    marginBottom: 4,
+    marginBottom: scaleVertical(4),
   },
   recommendedLimitValue: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: 'bold',
     color: '#0369a1',
   },
   obligationAccountItem: {
-    marginBottom: 16,
+    marginBottom: scaleVertical(16),
     paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
   },
   obligationAccountName: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     fontWeight: '600',
     color: '#334155',
   },
   accountStatusTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
+    paddingHorizontal: scale(8),
+    paddingVertical: scaleVertical(4),
+    borderRadius: scale(4),
   },
   accountStatusTagText: {
-    fontSize: 11,
+    fontSize: scaleFont(11),
     fontWeight: '600',
   },
   activeTag: {
@@ -3517,22 +3547,22 @@ const styles = StyleSheet.create({
   accountDetailsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: scaleVertical(8),
   },
   progressBarContainer: {
     flex: 1,
-    height: 8,
+    height: scale(8),
     backgroundColor: '#e2e8f0',
-    borderRadius: 4,
-    marginRight: 12,
+    borderRadius: scale(4),
+    marginRight: scale(12),
     overflow: 'hidden',
   },
   progressBarFill: {
     height: '100%',
-    borderRadius: 4,
+    borderRadius: scale(4),
   },
   balanceText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     fontWeight: '500',
     color: '#475569',
   },
@@ -3540,48 +3570,48 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#64748b',
     fontStyle: 'italic',
-    paddingVertical: 10,
+    paddingVertical: scaleVertical(10),
   },
   loadingContainer: {
-    padding: 40,
+    padding: scale(40),
     alignItems: 'center',
     justifyContent: 'center',
   },
   loadingText: {
-    marginTop: 16,
-    fontSize: 16,
+    marginTop: scaleVertical(16),
+    fontSize: scaleFont(16),
     color: '#666',
     textAlign: 'center',
   },
   errorContainer: {
-    padding: 40,
+    padding: scale(40),
     alignItems: 'center',
     justifyContent: 'center',
   },
   errorText: {
-    fontSize: 16,
+    fontSize: scaleFont(16),
     color: '#FF4444',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: scaleVertical(16),
   },
   retryButton: {
     backgroundColor: '#0066CC',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingHorizontal: scale(24),
+    paddingVertical: scaleVertical(12),
+    borderRadius: scale(8),
   },
   retryButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: scaleFont(16),
     fontWeight: '600',
   },
   // AI Summary Card Styles
   aiSummaryCard: {
     backgroundColor: '#F0F9FF',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 14,
-    borderRadius: 10,
+    marginHorizontal: scale(16),
+    marginBottom: scaleVertical(12),
+    padding: scale(14),
+    borderRadius: scale(10),
     borderWidth: 1,
     borderColor: '#B3D9FF',
   },
@@ -3596,41 +3626,41 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   aiSummaryTitle: {
-    fontSize: 15,
+    fontSize: scaleFont(15),
     fontWeight: '700',
     color: '#0066CC',
-    marginLeft: 8,
+    marginLeft: scale(8),
   },
   scoreBadge: {
     backgroundColor: '#0066CC',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: scale(10),
+    paddingVertical: scaleVertical(4),
+    borderRadius: scale(12),
   },
   scoreText: {
     color: 'white',
-    fontSize: 11,
+    fontSize: scaleFont(11),
     fontWeight: '700',
   },
   // Fit Score Badge
   fitScoreBadge: {
     backgroundColor: '#34C759',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginLeft: 8,
+    paddingHorizontal: scale(10),
+    paddingVertical: scaleVertical(4),
+    borderRadius: scale(12),
+    marginLeft: scale(8),
   },
   fitScoreText: {
     color: 'white',
-    fontSize: 11,
+    fontSize: scaleFont(11),
     fontWeight: '700',
   },
   // Collapsible Sections
   collapsibleSection: {
     backgroundColor: '#F9FAFB',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 12,
+    padding: scale(12),
+    borderRadius: scale(8),
+    marginBottom: scaleVertical(12),
     borderWidth: 1,
     borderColor: '#E5E5E5',
   },
@@ -3645,44 +3675,44 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   collapsibleTitle: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     fontWeight: '600',
     color: '#333333',
-    marginLeft: 8,
+    marginLeft: scale(8),
   },
   collapsibleText: {
-    fontSize: 13,
+    fontSize: scaleFont(13),
     color: '#333333',
-    lineHeight: 20,
-    marginTop: 8,
+    lineHeight: scaleFont(20),
+    marginTop: scaleVertical(8),
     flexWrap: 'wrap',
   },
   moreBenefitsText: {
-    fontSize: 12,
+    fontSize: scaleFont(12),
     color: '#0066CC',
     fontWeight: '600',
-    marginTop: 4,
-    marginLeft: 22,
+    marginTop: scaleVertical(4),
+    marginLeft: scale(22),
   },
   // No Recommendations Container
   noRecommendationsContainer: {
-    padding: 40,
+    padding: scale(40),
     alignItems: 'center',
     justifyContent: 'center',
   },
   noRecommendationsText: {
-    fontSize: 18,
+    fontSize: scaleFont(18),
     fontWeight: '600',
     color: '#4A5568',
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: scaleVertical(16),
+    marginBottom: scaleVertical(8),
     textAlign: 'center',
   },
   noRecommendationsSubtext: {
-    fontSize: 14,
+    fontSize: scaleFont(14),
     color: '#8E8E93',
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: scaleFont(20),
   },
 });
 
